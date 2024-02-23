@@ -17,4 +17,9 @@
  # Overview
 
  Cloud TPU Goodput is a library intended to be used with Cloud TPU to log the
- necessary information and query a job's Goodput.
+ necessary information and query a job's Goodput. It can be pip installed to
+ import its modules, and retrieve information about a training job's overall
+ productive Goodput. The package exposes API interfaces to log useful
+ information from the user application and query Goodput for the job run, gain
+ insight into the productivity of ML workloads and utilization of compute
+ resources.

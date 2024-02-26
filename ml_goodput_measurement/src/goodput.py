@@ -292,11 +292,17 @@ class GoodputCalculator:
     # additional time that was counted as productive but lost due to a
     # disruption.
     step_start_data = {}
+    curr_last_step = -1
     job_end_time = None
     for payload in entries:
       if _STEP_START_TIME in payload:
-        # Overwrite start time information to record the latest for each step.
-        step_start_data[payload[_STEP_COUNT]] = payload[_STEP_START_TIME]
+        curr_step = payload[_STEP_COUNT]
+        step_start_data[curr_step] = payload[_STEP_START_TIME]
+        for step in range(curr_step + 1, curr_last_step + 1):
+          if step in step_start_data:
+            step_start_data.pop(step)
+        curr_last_step = curr_step
+
       if _JOB_END_TIME in payload:
         # Locate the last instance of job's end time if the job has completed.
         job_end_time = payload[_JOB_END_TIME]
@@ -305,15 +311,18 @@ class GoodputCalculator:
     # the step completed by looking for the corresponding run's end time, since
     # there are are no more steps to check for its completion or compute step
     # time.
-    last_step = max(step_start_data.keys()) if step_start_data else 0
     productive_training_time = 0.0
 
     for step_count, step_start_time in step_start_data.items():
-      if step_count == last_step and job_end_time is not None:
-        productive_training_time += job_end_time - step_start_time
-      elif step_count + 1 in step_start_data:
+      if step_count < curr_last_step:
         productive_training_time += (
             step_start_data[step_count + 1] - step_start_time
+        )
+      elif job_end_time is not None:
+        productive_training_time += job_end_time - step_start_time
+      else:
+        productive_training_time += (
+            datetime.datetime.utcnow().timestamp() - step_start_time
         )
 
     return productive_training_time
@@ -343,8 +352,8 @@ class GoodputCalculator:
     if job_end_time is not None:
       return job_end_time - job_start_time
 
+    # If the job did not complete, use current time to compute total job time.
     if job_start_time is not None:
-      # If the job did not complete, use current time to compute total job time.
       return datetime.datetime.utcnow().timestamp() - job_start_time
 
     return 0.0

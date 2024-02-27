@@ -72,7 +72,7 @@ class _CloudLogger:
 
   def read_cloud_logging_entries(self):
     return self._filter_entries_for_job(
-        self.logger.list_entries(order_by='timestamp asc')
+        self.logger.list_entries(order_by=google.cloud.logging.ASCENDING)
     )
 
 

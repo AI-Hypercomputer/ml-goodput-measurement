@@ -296,7 +296,7 @@ class GoodputCalculator:
     job_end_time = None
     for payload in entries:
       if _STEP_START_TIME in payload:
-        curr_step = payload[_STEP_COUNT]
+        curr_step = int(payload[_STEP_COUNT])
         step_start_data[curr_step] = payload[_STEP_START_TIME]
         for step in range(curr_step + 1, curr_last_step + 1):
           if step in step_start_data:

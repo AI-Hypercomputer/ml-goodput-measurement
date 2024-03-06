@@ -281,6 +281,18 @@ class GoodputCalculator:
       The job's total productive training time.
 
     """
+    def get_segment_productive_time(
+        step_start_data: dict[int, float], curr_step: int
+    ) -> float:
+      if curr_step == 0:
+        return 0.0
+
+      segment_productive_time = 0.0
+      for step, start_time in step_start_data.items():
+        if step <= curr_step and step - 1 in step_start_data:
+          segment_productive_time += start_time - step_start_data[step - 1]
+      return segment_productive_time
+
     # Build a deserialized dictionary from cloud logging entries to store step
     # start times. The dictionary maps from step count to start time and will be
     # used to each step's productive time by looking for its completion in the
@@ -291,39 +303,42 @@ class GoodputCalculator:
     # overwritten by design so as to correct for the the previously computed
     # additional time that was counted as productive but lost due to a
     # disruption.
+    productive_training_time = 0.0
     step_start_data = {}
-    curr_last_step = -1
     job_end_time = None
     for payload in entries:
       if _STEP_START_TIME in payload:
         curr_step = int(payload[_STEP_COUNT])
-        step_start_data[curr_step] = payload[_STEP_START_TIME]
-        for step in range(curr_step + 1, curr_last_step + 1):
-          if step in step_start_data:
-            step_start_data.pop(step)
-        curr_last_step = curr_step
+        if curr_step not in step_start_data:
+          step_start_data[curr_step] = payload[_STEP_START_TIME]
+        else:
+          # In this case, the job restarted from Step (curr_step). It means that
+          # all progress till Step (curr_step - 1) has been preserved. So we
+          # can get the productive time since the previous start/restart and
+          # then clear the step_start_data dict.
+          productive_training_time += get_segment_productive_time(
+              step_start_data, curr_step
+          )
+          step_start_data = {curr_step: payload[_STEP_START_TIME]}
 
       if _JOB_END_TIME in payload:
         # Locate the last instance of job's end time if the job has completed.
         job_end_time = payload[_JOB_END_TIME]
 
-    # Largest step count that has been recorded. For the last step, we check if
-    # the step completed by looking for the corresponding run's end time, since
-    # there are are no more steps to check for its completion or compute step
-    # time.
-    productive_training_time = 0.0
+    if not step_start_data:
+      return 0.0
 
-    for step_count, step_start_time in step_start_data.items():
-      if step_count < curr_last_step:
-        productive_training_time += (
-            step_start_data[step_count + 1] - step_start_time
-        )
-      elif job_end_time is not None:
-        productive_training_time += job_end_time - step_start_time
-      else:
-        productive_training_time += (
-            datetime.datetime.utcnow().timestamp() - step_start_time
-        )
+    last_step = max(list(step_start_data.keys()))
+    productive_training_time += get_segment_productive_time(
+        step_start_data, last_step
+    )
+
+    if job_end_time is not None:
+      productive_training_time += job_end_time - step_start_data[last_step]
+    else:
+      productive_training_time += (
+          datetime.datetime.utcnow().timestamp() - step_start_data[last_step]
+      )
 
     return productive_training_time
 

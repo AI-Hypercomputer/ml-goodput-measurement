@@ -16,6 +16,7 @@ _STEP_START_TIME = 'step_start_time'
 _JOB_START_TIME = 'job_start_time'
 _JOB_END_TIME = 'job_end_time'
 
+_CLOUD_LOGGING_PAGE_SIZE = 1000000
 
 class _CloudLogger:
   """A helper class for reading and writing to Cloud Logging.
@@ -72,7 +73,10 @@ class _CloudLogger:
 
   def read_cloud_logging_entries(self):
     return self._filter_entries_for_job(
-        self.logger.list_entries(order_by=google.cloud.logging.ASCENDING)
+        self.logger.list_entries(
+            order_by=google.cloud.logging.ASCENDING,
+            page_size=_CLOUD_LOGGING_PAGE_SIZE,
+        )
     )
 
 
@@ -284,6 +288,19 @@ class GoodputCalculator:
     def get_segment_productive_time(
         step_start_data: dict[int, float], curr_step: int
     ) -> float:
+      """Helper function to compute the segment productive time.
+
+      This method computes productive training time between the beginning of a
+      segment of step start time data and current step.
+
+      Args:
+        step_start_data: Dictionary containing a segment of step time data.
+        curr_step: The current step until which the segment productive time is
+          calculated.
+
+      Returns:
+        The job's segment productive training time.
+      """
       if curr_step == 0:
         return 0.0
 
@@ -364,13 +381,14 @@ class GoodputCalculator:
       if _JOB_END_TIME in payload:
         job_end_time = payload[_JOB_END_TIME]
 
-    if job_end_time is not None:
-      return job_end_time - job_start_time
-
-    # If the job did not complete, use current time to compute total job time.
     if job_start_time is not None:
+      if job_end_time is not None:
+        return job_end_time - job_start_time
+      # If the job's end time is missing then job has not yet completed, use
+      # current time to compute total job time.
       return datetime.datetime.utcnow().timestamp() - job_start_time
-
+    # The the job's start time is missing so the total job time cannot be
+    # calculated. Caller of this function should raise an error if this happens.
     return 0.0
 
   def get_job_goodput(self):
@@ -386,6 +404,7 @@ class GoodputCalculator:
     Raises:
       ValueError if computed total job time is zero. In this case, Goodput
       cannot be computed.
+      ValueError if productive training time is invalid.
     """
     entries = self._cloud_logger.read_cloud_logging_entries()
     total_job_time = self._get_total_job_time(entries)
@@ -398,7 +417,13 @@ class GoodputCalculator:
           ' logging entries.'
       )
     productive_training_time = self._get_total_productive_training_time(entries)
-
+    if (
+        productive_training_time < 0.0
+        or productive_training_time > total_job_time
+    ):
+      raise ValueError(
+          'Productive training time is invalid. Please fix the logging entries.'
+      )
     return (float(productive_training_time) / total_job_time) * 100
 
   def get_job_goodput_interval(self, interval_start, interval_end):

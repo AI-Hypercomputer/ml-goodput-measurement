@@ -74,9 +74,9 @@ To learn more about Google Cloud Logging, visit this [page](https://cloud.google
  from ml_goodput_measurement import goodput
  ```
 
-### Define the name of the Google Cloud Logging logger bucket
+### Define the name of the Google Cloud Logging logger.
 
- Create a run-specific logger bucket where Cloud Logging entries can be written and read from.
+ Create a run-specific logger name where Cloud Logging entries can be written to and read from.
 
  For example:
 

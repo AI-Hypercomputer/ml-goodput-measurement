@@ -21,10 +21,14 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
-## [Unreleased]
+## [0.0.2] - 2024-02-29
+* Bug Fixes
+  * Fixes a typing mismatch in total step time calculation.
+* Code and documentation cleanup
 
 ## [0.0.1] - 2024-02-26
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
-[1.0.0]: https://github.com/google/cloud_tpu_goodput/releases/tag/v1.0.0
+[0.0.2]: https://github.com/google/cloud_tpu_goodput/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/google/cloud_tpu_goodput/releases/tag/v0.0.1

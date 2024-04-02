@@ -8,7 +8,6 @@ computed Goodput.
 import datetime
 import logging
 from typing import Any, Optional
-import google.cloud.logging
 
 _JOB_NAME = 'job_name'
 _STEP_COUNT = 'step_count'
@@ -33,6 +32,7 @@ class _CloudLogger:
       job_name: Name of the job the _CloudLogger is for.
       log_name: Name of the log being written.
     """
+    import google.cloud.logging   # pylint: disable=g-import-not-at-top
     self.job_name = job_name
     logging_client = google.cloud.logging.Client()
     self.logger = logging_client.logger(log_name)
@@ -72,6 +72,7 @@ class _CloudLogger:
       )
 
   def read_cloud_logging_entries(self):
+    import google.cloud.logging   # pylint: disable=g-import-not-at-top
     return self._filter_entries_for_job(
         self.logger.list_entries(
             order_by=google.cloud.logging.ASCENDING,

@@ -16,7 +16,8 @@ _TEST_STEP_START_TIME = _TEST_JOB_START_TIME + _TEST_PROGRAM_STARTUP_TIME
 _TEST_TOTAL_STEPS = 5
 _TEST_STEP_TIME = datetime.timedelta(seconds=3)
 _TEST_JOB_END_TIME = _TEST_STEP_START_TIME + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
-
+# Badput time included in the first step time after start and restart.
+_TEST_FIRST_STEP_EXTRA_TIME = datetime.timedelta(seconds=5)
 
 class MockCloudLogger:
 
@@ -111,6 +112,45 @@ class GoodputTest(googletest.TestCase):
     )
     self.assertEqual(computed_goodput, expected_goodput)
 
+  def test_goodput_with_startup_badput(self):
+    """Test function to validate goodput with startup badput."""
+
+    job_start_time = datetime.datetime.utcnow()
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock _TEST_TOTAL_STEPS steps of training
+    step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
+
+    # All steps but first progress with average step time.
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      # Introduce startup badput during the first step
+      if step == 0:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    total_time = (
+        _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + _TEST_FIRST_STEP_EXTRA_TIME
+    )
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Get the computed Goodput from the library and compare with expected
+    # result.
+
+    computed_goodput = self.goodput_calculator.get_job_goodput()
+    expected_goodput = (
+        (
+            _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
+        )
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
 
 class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
 
@@ -240,6 +280,69 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
         + disruption_time
         + _TEST_PROGRAM_STARTUP_TIME
         + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+    seconds_before_query = 2
+    query_time = total_time.total_seconds() + seconds_before_query
+
+    time.sleep(query_time)
+    computed_goodput = self.goodput_calculator.get_job_goodput()
+    expected_goodput = (
+        (
+            _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
+            + seconds_before_query
+        )
+        / query_time
+        * 100
+    )
+
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+
+  def test_goodput_with_startup_badput(self):
+    """Test function to validate goodput with startup badput."""
+
+    job_start_time = datetime.datetime.utcnow()
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock _TEST_TOTAL_STEPS steps of training
+    step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
+
+    # All steps but first progress with average step time.
+    for step in range(0, _TEST_TOTAL_STEPS):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      # Introduce startup badput during the first step
+      if step == 0:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    # Simulate a 30-second disruption.
+    disruption_time = datetime.timedelta(seconds=30)
+    job_start_time = step_start_time + disruption_time
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
+
+    restart_from_step = 2
+    # All steps but first progress with average step time.
+    for step in range(restart_from_step, _TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      # Introduce badput during the first step after restart
+      if step == restart_from_step:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    # Get the computed Goodput from the library and compare with expected
+    # result.
+
+    # The time from when the job first started to when the last step start was
+    # logged.
+    total_time = (
+        _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + disruption_time
+        + _TEST_PROGRAM_STARTUP_TIME
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
     )
     seconds_before_query = 2
     query_time = total_time.total_seconds() + seconds_before_query

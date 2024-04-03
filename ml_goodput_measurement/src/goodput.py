@@ -305,11 +305,38 @@ class GoodputCalculator:
       if curr_step == 0:
         return 0.0
 
-      segment_productive_time = 0.0
+      segment_productive_total_time = 0.0
+      first_step_time = 0.0
+      steps_in_segment = 0
+      min_step = min(list(step_start_data.keys()))
       for step, start_time in step_start_data.items():
-        if step <= curr_step and step - 1 in step_start_data:
-          segment_productive_time += start_time - step_start_data[step - 1]
-      return segment_productive_time
+        if (
+            step <= curr_step
+            and step - 1 in step_start_data
+        ):
+          segment_productive_total_time += (
+              start_time - step_start_data[step - 1]
+          )
+          if step - 1 == min_step:
+            first_step_time = segment_productive_total_time
+          steps_in_segment += 1
+
+      if steps_in_segment == 0:
+        return 0.0
+
+      if steps_in_segment == 1:
+        # Extra step time is not computable with only one step, so it is not
+        # discounted in this case.
+        return first_step_time
+
+      # Compute Badput from the first step
+      first_step_extra_time = 0.0
+      average_step_time = (segment_productive_total_time - first_step_time) / (
+          steps_in_segment - 1
+      )
+      if first_step_time > average_step_time:
+        first_step_extra_time = first_step_time - average_step_time
+      return segment_productive_total_time - first_step_extra_time
 
     # Build a deserialized dictionary from cloud logging entries to store step
     # start times. The dictionary maps from step count to start time and will be

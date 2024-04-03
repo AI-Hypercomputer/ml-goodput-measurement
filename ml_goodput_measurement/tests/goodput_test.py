@@ -18,6 +18,8 @@ _TEST_STEP_TIME = datetime.timedelta(seconds=3)
 _TEST_JOB_END_TIME = _TEST_STEP_START_TIME + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
 # Badput time included in the first step time after start and restart.
 _TEST_FIRST_STEP_EXTRA_TIME = datetime.timedelta(seconds=5)
+# Anomalous large step times
+_TEST_ANOMALOUS_STEP_TIME = datetime.timedelta(seconds=30)
 
 class MockCloudLogger:
 
@@ -151,6 +153,7 @@ class GoodputTest(googletest.TestCase):
     )
 
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+
 
 class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
 
@@ -360,6 +363,148 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
 
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
 
+
+class GoodputPathwaysTest(googletest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = 'test-run'
+    self.logger_name = 'test-log'
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput.GoodputRecorder(
+        self.job_name,
+        self.logger_name,
+        True,
+        self.mock_cloud_logger,
+    )
+    self.goodput_calculator = goodput.GoodputCalculator(
+        self.job_name, self.logger_name, self.mock_cloud_logger, True
+    )
+
+  def test_goodput_with_anomalous_steps_single_disruption(self):
+    """Test function to validate goodput with anomalous step times due to a single disruption."""
+    # This test simulates _TEST_TOTAL_STEPS training steps and a single
+    # disruption during the job's run time as follows:
+    # [0, 1, 2, Handled Disruption, 3, 4]
+    # The handled disruption will manifest as anomalously large step times.
+
+    job_start_time = datetime.datetime.utcnow()
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock some program startup time before the training steps
+    step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
+
+    # First few steps progress with normal step time.
+    for step in range(_TEST_TOTAL_STEPS - 3):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    # Introduce an anomalously large step time due to a disruption.
+    self.goodput_recorder.record_step_start_time(
+        _TEST_TOTAL_STEPS - 3, step_start_time
+    )
+    step_start_time += _TEST_ANOMALOUS_STEP_TIME + _TEST_STEP_TIME
+
+    # Remaining steps progress with normal step time.
+    for step in range(_TEST_TOTAL_STEPS - 2, _TEST_TOTAL_STEPS):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    job_end_time = (
+        job_start_time
+        + _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_ANOMALOUS_STEP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+    )
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # The time from when the job first started to when the last step start was
+    # logged.
+    total_time = (
+        _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + _TEST_ANOMALOUS_STEP_TIME
+    )
+
+    computed_goodput = self.goodput_calculator.get_job_goodput()
+    expected_goodput = (
+        (_TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+
+  def test_goodput_with_anomalous_steps_multiple_disruptions(self):
+    """Test function to validate goodput with anomalous step times due to multiple disruptions."""
+
+    # This test simulates _TEST_TOTAL_STEPS * 2 training steps and multiple
+    # disruptions during the job's run time as follows:
+    # [0, 1, 2, Handled Disruption, 3, 4, 5, 6, 7 Handled Disruption, 8, 9]
+    # The handled disruptions will manifest as anomalously large step times.
+
+    job_start_time = datetime.datetime.utcnow()
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock some program startup time before the training steps
+    step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
+
+    # First few steps progress with normal step time.
+    for step in range(_TEST_TOTAL_STEPS - 3):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    # Introduce an anomalously large step time due to a disruption.
+    self.goodput_recorder.record_step_start_time(
+        _TEST_TOTAL_STEPS - 3, step_start_time
+    )
+    step_start_time += _TEST_ANOMALOUS_STEP_TIME + _TEST_STEP_TIME
+
+    # A few more steps progress with normal step time.
+    for step in range(_TEST_TOTAL_STEPS - 2, _TEST_TOTAL_STEPS + 2):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    # Introduce an anomalously large step time due to a second disruption.
+    self.goodput_recorder.record_step_start_time(
+        _TEST_TOTAL_STEPS + 2, step_start_time
+    )
+    step_start_time += _TEST_ANOMALOUS_STEP_TIME + _TEST_STEP_TIME
+
+    # Remaining steps progress with normal step time.
+    for step in range(_TEST_TOTAL_STEPS + 3, _TEST_TOTAL_STEPS * 2):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    job_end_time = (
+        job_start_time
+        + _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_ANOMALOUS_STEP_TIME * 2
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS * 2
+    )
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # The time from when the job first started to when the last step start was
+    # logged.
+    total_time = (
+        _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS * 2
+        + _TEST_ANOMALOUS_STEP_TIME * 2
+    )
+
+    computed_goodput = self.goodput_calculator.get_job_goodput()
+    expected_goodput = (
+        (2 * _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
 
 if __name__ == '__main__':
   googletest.main()

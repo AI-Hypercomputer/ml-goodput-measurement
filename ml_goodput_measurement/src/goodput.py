@@ -8,6 +8,8 @@ computed Goodput.
 import datetime
 import logging
 from typing import Any, Optional
+from scipy import stats
+import numpy as np
 
 _JOB_NAME = 'job_name'
 _STEP_COUNT = 'step_count'
@@ -254,6 +256,7 @@ class GoodputCalculator:
 
   Attributes:
     job_name: Name of the job the GoodputCalculator is for.
+    using_pathways: Whether or not the job uses Pathways.
   """
 
   def __init__(
@@ -261,6 +264,7 @@ class GoodputCalculator:
       job_name: str,
       logger_name: str,
       logger: Optional[_CloudLogger] = None,
+      using_pathways: bool = False,
   ):
     """GoodputCalculator constructor.
 
@@ -270,6 +274,7 @@ class GoodputCalculator:
       logger: Should never be passed directly by the user.
     """
     self.job_name = job_name
+    self.using_pathways = using_pathways
     if logger is not None:
       self._cloud_logger = logger
     else:
@@ -284,8 +289,33 @@ class GoodputCalculator:
 
     Returns:
       The job's total productive training time.
-
     """
+
+    def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
+      def get_anomalous_and_normal_step_times(
+          step_times: list[Any],
+      ) -> tuple[list[Any], list[Any]]:
+        mad = stats.median_abs_deviation(step_times)
+        med = np.median(step_times)
+
+        anomalous_step_times = []
+        normal_step_times = []
+        for step_time in step_times:
+          if step_time > (med + mad * 3):
+            anomalous_step_times.append(step_time)
+          else:
+            normal_step_times.append(step_time)
+
+        return anomalous_step_times, normal_step_times
+
+      anomalous_step_times, normal_step_times = (
+          get_anomalous_and_normal_step_times(step_times)
+      )
+      normal_step_mean = np.mean(normal_step_times)
+      return sum(anomalous_step_times) - (
+          len(anomalous_step_times) * normal_step_mean
+      )
+
     def get_segment_productive_time(
         step_start_data: dict[int, float], curr_step: int
     ) -> float:
@@ -309,6 +339,7 @@ class GoodputCalculator:
       first_step_time = 0.0
       steps_in_segment = 0
       min_step = min(list(step_start_data.keys()))
+      step_times = []
       for step, start_time in step_start_data.items():
         if (
             step <= curr_step
@@ -319,6 +350,10 @@ class GoodputCalculator:
           )
           if step - 1 == min_step:
             first_step_time = segment_productive_total_time
+          else:
+            # Collect all non-first step times to compute possible Badput
+            # from anomalous failures.
+            step_times.append(start_time - step_start_data[step - 1])
           steps_in_segment += 1
 
       if steps_in_segment == 0:
@@ -336,7 +371,16 @@ class GoodputCalculator:
       )
       if first_step_time > average_step_time:
         first_step_extra_time = first_step_time - average_step_time
-      return segment_productive_total_time - first_step_extra_time
+      extra_time_from_anomalous_steps = 0.0
+      if self.using_pathways:
+        extra_time_from_anomalous_steps = get_extra_time_from_anomalous_steps(
+            step_times
+        )
+      return (
+          segment_productive_total_time
+          - first_step_extra_time
+          - extra_time_from_anomalous_steps
+      )
 
     # Build a deserialized dictionary from cloud logging entries to store step
     # start times. The dictionary maps from step count to start time and will be

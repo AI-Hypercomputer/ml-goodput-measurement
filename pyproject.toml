@@ -32,7 +32,9 @@ keywords = []
 
 # pip dependencies installed with `pip install -e .`
 dependencies = [
-  "google-cloud-logging>=3.5.0"
+  "google-cloud-logging>=3.5.0",
+  "numpy",
+  "scipy",
 ]
 
 [project.urls]

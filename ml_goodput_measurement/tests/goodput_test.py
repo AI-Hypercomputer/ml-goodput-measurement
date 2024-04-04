@@ -12,6 +12,7 @@ _TEST_JOB_START_TIME = datetime.datetime(
     year=2024, month=1, day=1, hour=1, minute=0, second=0, microsecond=0
 )
 _TEST_PROGRAM_STARTUP_TIME = datetime.timedelta(seconds=5)
+_TEST_TPU_INIT_TIME = datetime.timedelta(seconds=1)
 _TEST_STEP_START_TIME = _TEST_JOB_START_TIME + _TEST_PROGRAM_STARTUP_TIME
 _TEST_TOTAL_STEPS = 5
 _TEST_STEP_TIME = datetime.timedelta(seconds=3)
@@ -505,6 +506,46 @@ class GoodputPathwaysTest(googletest.TestCase):
     )
 
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+
+class BadputTest(googletest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = 'test-run'
+    self.logger_name = 'test-log'
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput.GoodputRecorder(
+        self.job_name,
+        self.logger_name,
+        True,
+        self.mock_cloud_logger,
+    )
+
+  def test_tpu_init_recorder(self):
+    """Test function to validate goodput recorder for TPU init."""
+    # Record TPU init
+    self.goodput_recorder.record_tpu_init_start_time(_TEST_JOB_START_TIME)
+    self.goodput_recorder.record_tpu_init_end_time(
+        _TEST_JOB_START_TIME + _TEST_TPU_INIT_TIME
+    )
+
+    # Ensure read returns the right number of entries.
+    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    self.assertLen(validate_entries, 2)
+    # Ensure payload contains the expected information.
+    for entry_payload in validate_entries:
+      self.assertIn(goodput._JOB_NAME, entry_payload)
+      self.assertEqual(entry_payload[goodput._JOB_NAME], self.job_name)
+      if goodput._TPU_INIT_START_TIME in entry_payload:
+        self.assertEqual(
+            entry_payload[goodput._TPU_INIT_START_TIME],
+            _TEST_JOB_START_TIME.timestamp(),
+        )
+      if goodput._TPU_INIT_END_TIME in entry_payload:
+        self.assertEqual(
+            entry_payload[goodput._TPU_INIT_END_TIME],
+            (_TEST_JOB_START_TIME + _TEST_TPU_INIT_TIME).timestamp(),
+        )
 
 if __name__ == '__main__':
   googletest.main()

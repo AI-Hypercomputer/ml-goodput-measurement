@@ -18,6 +18,8 @@ _JOB_START_TIME = 'job_start_time'
 _JOB_END_TIME = 'job_end_time'
 _TPU_INIT_START_TIME = 'tpu_init_start_time'
 _TPU_INIT_END_TIME = 'tpu_init_end_time'
+_TRAINING_PREPARATION_START_TIME = 'training_prep_start_time'
+_TRAINING_PREPARATION_END_TIME = 'training_prep_end_time'
 
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
 
@@ -242,7 +244,15 @@ class GoodputRecorder:
     Args:
       start_time: Start time of training preparation.
     """
-    pass
+    if self._cloud_logger is None:
+      return
+    if start_time is None:
+      start_time = datetime.datetime.utcnow()
+
+    self._cloud_logger.write_cloud_logging_entry({
+        _JOB_NAME: self.job_name,
+        _TRAINING_PREPARATION_START_TIME: start_time.timestamp(),
+    })
 
   def record_training_preparation_end_time(self, end_time):
     """Main recorder function to log the end time of training preparation before starting a training loop.
@@ -250,7 +260,15 @@ class GoodputRecorder:
     Args:
       end_time: End time of training preparation.
     """
-    pass
+    if self._cloud_logger is None:
+      return
+    if end_time is None:
+      end_time = datetime.datetime.utcnow()
+
+    self._cloud_logger.write_cloud_logging_entry({
+        _JOB_NAME: self.job_name,
+        _TRAINING_PREPARATION_END_TIME: end_time.timestamp(),
+    })
 
   def record_data_loading_start_time(self, start_time):
     """Main recorder function to log the start time of training's data loading.

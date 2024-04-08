@@ -14,6 +14,7 @@ _TEST_JOB_START_TIME = datetime.datetime(
 _TEST_PROGRAM_STARTUP_TIME = datetime.timedelta(seconds=5)
 _TEST_TPU_INIT_TIME = datetime.timedelta(seconds=1)
 _TEST_TRAINING_PREPARATION_TIME = datetime.timedelta(seconds=2)
+_TEST_DATA_LOADING_TIME = datetime.timedelta(seconds=2)
 _TEST_STEP_START_TIME = _TEST_JOB_START_TIME + _TEST_PROGRAM_STARTUP_TIME
 _TEST_TOTAL_STEPS = 5
 _TEST_STEP_TIME = datetime.timedelta(seconds=3)
@@ -608,6 +609,72 @@ class BadputTest(googletest.TestCase):
       if goodput._TRAINING_PREPARATION_END_TIME in entry_payload:
         self.assertAlmostEqual(
             entry_payload[goodput._TRAINING_PREPARATION_END_TIME],
+            expected_end_time.timestamp(),
+            delta=0.1,
+        )
+
+  def test_data_loading_recorder(self):
+    """Test function to validate goodput recorder for data loading."""
+    # Record data loading time.
+    data_loading_start_time = (
+        _TEST_JOB_START_TIME
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+    )
+    data_loading_end_time = (
+        _TEST_JOB_START_TIME
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+    self.goodput_recorder.record_data_loading_start_time(
+        data_loading_start_time
+    )
+    self.goodput_recorder.record_data_loading_end_time(data_loading_end_time)
+
+    # Ensure read returns the right number of entries.
+    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    self.assertLen(validate_entries, 2)
+    # Ensure payload contains the expected information.
+    for entry_payload in validate_entries:
+      self.assertIn(goodput._JOB_NAME, entry_payload)
+      self.assertEqual(entry_payload[goodput._JOB_NAME], self.job_name)
+      if goodput._DATA_LOADING_START_TIME in entry_payload:
+        self.assertEqual(
+            entry_payload[goodput._DATA_LOADING_START_TIME],
+            data_loading_start_time.timestamp(),
+        )
+      if goodput._DATA_LOADING_END_TIME in entry_payload:
+        self.assertEqual(
+            entry_payload[goodput._DATA_LOADING_END_TIME],
+            data_loading_end_time.timestamp(),
+        )
+
+  def test_data_loading_recorder_no_timestamps(self):
+    """Test function to validate goodput recorder for data loading."""
+    # Record data loading time.
+    expected_start_time = datetime.datetime.utcnow()
+    self.goodput_recorder.record_data_loading_start_time(None)
+    time.sleep(_TEST_DATA_LOADING_TIME.total_seconds())
+    expected_end_time = datetime.datetime.utcnow()
+    self.goodput_recorder.record_data_loading_end_time(None)
+
+    # Ensure read returns the right number of entries.
+    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    self.assertLen(validate_entries, 2)
+    # Ensure payload contains the expected information.
+    for entry_payload in validate_entries:
+      self.assertIn(goodput._JOB_NAME, entry_payload)
+      self.assertEqual(entry_payload[goodput._JOB_NAME], self.job_name)
+      if goodput._DATA_LOADING_START_TIME in entry_payload:
+        self.assertAlmostEqual(
+            entry_payload[goodput._DATA_LOADING_START_TIME],
+            expected_start_time.timestamp(),
+            delta=0.1,
+        )
+      if goodput._DATA_LOADING_END_TIME in entry_payload:
+        self.assertAlmostEqual(
+            entry_payload[goodput._DATA_LOADING_END_TIME],
             expected_end_time.timestamp(),
             delta=0.1,
         )

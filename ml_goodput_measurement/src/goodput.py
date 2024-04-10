@@ -6,10 +6,11 @@ computed Goodput.
 """
 
 import datetime
+import enum
 import logging
 from typing import Any, Optional
-from scipy import stats
 import numpy as np
+from scipy import stats
 
 _JOB_NAME = 'job_name'
 _STEP_COUNT = 'step_count'
@@ -305,6 +306,18 @@ class GoodputRecorder:
     })
 
 
+class BadputType(enum.Enum):
+  """The type of Badput."""
+
+  TPU_INITIALIZATION = 1
+  TRAINING_PREP = 2
+  PROGRAM_STARTUP = 3
+  DATA_LOADING = 4
+  UNPRODUCTIVE_CHECKPOINTING = 5
+  WASTED_PROGRESS_FROM_DISRUPTION = 6
+  OTHER = 7
+
+
 class GoodputCalculator:
   """The Goodput calculator class, responsible for querying necessary information and computing Goodput metrics to return to the user application.
 
@@ -567,5 +580,37 @@ class GoodputCalculator:
 
     Returns:
       Goodput percentage of the job within specified time window.
+    """
+    pass
+
+  def get_job_badput(self):
+    """Method to get the total Badput of the job until now.
+
+    This method provides a singular Badput percentage of the entire job. Badput
+    comprises of all the time spent my the job doing work that is not training.
+    This includes time spent doing TPU initialization, training preparation,
+    checkpoint loading, compilation or re-compilation, data loading, checkpoint
+    saving, time lost due to disruptions and more.
+
+    Returns:
+      Badput percentage of the entire job.
+    """
+    pass
+
+  def get_job_badput_breakdown(
+      self, selected_badput_types: Optional[list[BadputType]] = None
+  ):
+    """Method to get the the Badput breakdown of the job.
+
+    This method provides a granular breakdown of the known components of Badput.
+
+    Args:
+      selected_badput_types: Optional filter to select a subset of Badput types
+        that the caller is interested in. If this argument is not set, all types
+        of Badput will be computed.
+
+    Returns:
+      A dictionary of badput components and their percentage breakdown within
+      total Badput.
     """
     pass

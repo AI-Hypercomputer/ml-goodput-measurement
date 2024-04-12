@@ -201,7 +201,9 @@ class GoodputRecorder:
         _JOB_END_TIME: end_time.timestamp(),
     })
 
-  def record_tpu_init_start_time(self, start_time):
+  def record_tpu_init_start_time(
+      self, start_time: Optional[datetime.datetime] = None
+  ):
     """Main recorder function to log the start time for TPU initialization.
 
     Note: TPU initialization may include the time spent in completing
@@ -221,7 +223,9 @@ class GoodputRecorder:
         _TPU_INIT_START_TIME: start_time.timestamp(),
     })
 
-  def record_tpu_init_end_time(self, end_time):
+  def record_tpu_init_end_time(
+      self, end_time: Optional[datetime.datetime] = None
+  ):
     """Main recorder function to log the end time for TPU initialization.
 
     Args:
@@ -237,7 +241,9 @@ class GoodputRecorder:
         _TPU_INIT_END_TIME: end_time.timestamp(),
     })
 
-  def record_training_preparation_start_time(self, start_time):
+  def record_training_preparation_start_time(
+      self, start_time: Optional[datetime.datetime] = None
+  ):
     """Main recorder function to log the start time of training preparation before starting a training loop.
 
     Note: Training preparation may include the time spent in creation of
@@ -257,7 +263,9 @@ class GoodputRecorder:
         _TRAINING_PREPARATION_START_TIME: start_time.timestamp(),
     })
 
-  def record_training_preparation_end_time(self, end_time):
+  def record_training_preparation_end_time(
+      self, end_time: Optional[datetime.datetime] = None
+  ):
     """Main recorder function to log the end time of training preparation before starting a training loop.
 
     Args:
@@ -273,7 +281,9 @@ class GoodputRecorder:
         _TRAINING_PREPARATION_END_TIME: end_time.timestamp(),
     })
 
-  def record_data_loading_start_time(self, start_time):
+  def record_data_loading_start_time(
+      self, start_time: Optional[datetime.datetime] = None
+  ):
     """Main recorder function to log the start time of training's data loading.
 
     Args:
@@ -289,7 +299,9 @@ class GoodputRecorder:
         _DATA_LOADING_START_TIME: start_time.timestamp(),
     })
 
-  def record_data_loading_end_time(self, end_time):
+  def record_data_loading_end_time(
+      self, end_time: Optional[datetime.datetime] = None
+  ):
     """Main recorder function to log the end time of training's data loading.
 
     Args:

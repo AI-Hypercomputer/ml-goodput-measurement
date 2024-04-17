@@ -46,26 +46,6 @@ class _CloudLogger:
     logging_client = google.cloud.logging.Client()
     self.logger = logging_client.logger(log_name)
 
-  def _filter_entries_for_job(self, entries) -> list[Any]:
-    """Filters entries for the specific job.
-
-    Args:
-      entries: Cloud Logging entries from user-specified logger.
-
-    Returns:
-      Filtered entries for the specific job.
-    """
-    filtered_entries = []
-    for entry in entries:
-      payload = entry.payload
-      if _JOB_NAME not in payload:
-        continue
-      if payload[_JOB_NAME] != self.job_name:
-        continue
-      filtered_entries.append(payload)
-
-    return filtered_entries
-
   def write_cloud_logging_entry(self, entry) -> None:
     """Writes an entry to the Cloud Logging logger at INFO level.
 
@@ -81,13 +61,25 @@ class _CloudLogger:
       )
 
   def read_cloud_logging_entries(self):
+    """Queries Cloud Logging entries for the specific job.
+
+    Returns:
+      Filtered entries in ascending order of timestamp.
+
+    """
     import google.cloud.logging   # pylint: disable=g-import-not-at-top
-    return self._filter_entries_for_job(
-        self.logger.list_entries(
-            order_by=google.cloud.logging.ASCENDING,
-            page_size=_CLOUD_LOGGING_PAGE_SIZE,
-        )
+    filter_entries = [
+        'severity=INFO',
+        f'jsonPayload.job_name="{self.job_name}"',
+    ]
+    filter_entries = ' AND '.join(filter_entries)
+    entries = self.logger.list_entries(
+        filter_=filter_entries,
+        order_by=google.cloud.logging.ASCENDING,
+        page_size=_CLOUD_LOGGING_PAGE_SIZE,
     )
+    entry_payload = [entry.payload for entry in entries]
+    return entry_payload
 
 
 class GoodputRecorder:

@@ -587,34 +587,13 @@ class GoodputCalculator:
     """
     pass
 
-  def get_job_badput(self):
-    """Method to get the total Badput of the job until now.
-
-    This method provides a singular Badput percentage of the entire job. Badput
-    comprises of all the time spent my the job doing work that is not training.
-    This includes time spent doing TPU initialization, training preparation,
-    checkpoint loading, compilation or re-compilation, data loading, checkpoint
-    saving, time lost due to disruptions and more.
-
-    Returns:
-      Badput percentage of the entire job.
-    """
-    pass
-
-  def get_job_badput_breakdown(
-      self, selected_badput_types: Optional[list[BadputType]] = None
-  ):
+  def get_job_badput_breakdown(self):
     """Method to get the the Badput breakdown of the job.
 
     This method provides a granular breakdown of the known components of Badput.
 
-    Args:
-      selected_badput_types: Optional filter to select a subset of Badput types
-        that the caller is interested in. If this argument is not set, all types
-        of Badput will be computed.
-
     Returns:
       A dictionary of badput components and their percentage breakdown within
-      total Badput.
+      total job time.
     """
     pass

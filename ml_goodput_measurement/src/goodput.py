@@ -26,6 +26,7 @@ _DATA_LOADING_END_TIME = 'data_loading_end_time'
 
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
 
+
 class _CloudLogger:
   """A helper class for reading and writing to Cloud Logging.
 
@@ -596,4 +597,39 @@ class GoodputCalculator:
       A dictionary of badput components and their percentage breakdown within
       total job time.
     """
-    pass
+    badput_breakdown = {}
+    entries = self._cloud_logger.read_cloud_logging_entries()
+    total_job_time = self._get_total_job_time(entries)
+    if total_job_time == 0.0:
+      raise ValueError(
+          'Total job time is zero, Badput cannot be calculated. Please fix the'
+          ' logging entries.'
+      )
+
+    tpu_init_start_time = None
+    tpu_initialization_badput = 0.0
+    for payload in entries:
+      if _TPU_INIT_START_TIME in payload:
+        tpu_init_start_time = payload[_TPU_INIT_START_TIME]
+      elif (
+          _TPU_INIT_END_TIME in payload and tpu_init_start_time is not None
+      ):
+        tpu_initialization_badput += (
+            payload[_TPU_INIT_END_TIME] - tpu_init_start_time
+        )
+        tpu_init_start_time = None
+
+    if (
+        tpu_initialization_badput > total_job_time
+        or tpu_initialization_badput < 0.0
+    ):
+      raise ValueError(
+          'Total badput from TPU initialization is invalid. Please fix the'
+          ' logging entries.'
+      )
+
+    badput_breakdown[BadputType.TPU_INITIALIZATION] = (
+        tpu_initialization_badput / total_job_time
+    ) * 100
+
+    return badput_breakdown

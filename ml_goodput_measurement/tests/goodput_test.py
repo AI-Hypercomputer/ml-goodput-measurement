@@ -522,6 +522,9 @@ class BadputTest(googletest.TestCase):
         True,
         self.mock_cloud_logger,
     )
+    self.goodput_calculator = goodput.GoodputCalculator(
+        self.job_name, self.logger_name, self.mock_cloud_logger
+    )
 
   def test_tpu_init_recorder(self):
     """Test function to validate goodput recorder for TPU init."""
@@ -678,6 +681,52 @@ class BadputTest(googletest.TestCase):
             expected_end_time.timestamp(),
             delta=0.1,
         )
+
+  def test_badput_calculator_tpu_initialization(self):
+    """Test function to validate computation of badput due to TPU initialization."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+
+    # Mock _TEST_TOTAL_STEPS steps of training with built-in badput
+    # due to program startup.
+    step_start_time = (
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_PROGRAM_STARTUP_TIME
+    )
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time.
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+    )
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    expected_badput_due_to_tpu_initialization = (
+        (_TEST_TPU_INIT_TIME.total_seconds()) / total_time.total_seconds() * 100
+    )
+    computed_badput_breakdown = (
+        self.goodput_calculator.get_job_badput_breakdown()
+    )
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        goodput.BadputType.TPU_INITIALIZATION, computed_badput_breakdown
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[goodput.BadputType.TPU_INITIALIZATION],
+        expected_badput_due_to_tpu_initialization,
+        delta=0.1,
+    )
 
 
 if __name__ == '__main__':

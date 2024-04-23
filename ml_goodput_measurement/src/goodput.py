@@ -608,8 +608,10 @@ class GoodputCalculator:
 
     tpu_init_start_time = None
     training_prep_start_time = None
+    data_loading_start_time = None
     tpu_initialization_badput = 0.0
     training_prep_badput = 0.0
+    data_loading_badput = 0.0
     for payload in entries:
       # Compute badput due to TPU initialization.
       if _TPU_INIT_START_TIME in payload:
@@ -634,6 +636,18 @@ class GoodputCalculator:
         )
         training_prep_start_time = None
 
+      # Compute badput due to data loading.
+      elif _DATA_LOADING_START_TIME in payload:
+        data_loading_start_time = payload[_DATA_LOADING_START_TIME]
+      elif (
+          _DATA_LOADING_END_TIME in payload
+          and data_loading_start_time is not None
+      ):
+        data_loading_badput += (
+            payload[_DATA_LOADING_END_TIME] - data_loading_start_time
+        )
+        data_loading_start_time = None
+
     if (
         tpu_initialization_badput > total_job_time
         or tpu_initialization_badput < 0.0
@@ -654,6 +668,15 @@ class GoodputCalculator:
       )
     badput_breakdown[BadputType.TRAINING_PREP] = (
         training_prep_badput / total_job_time
+    ) * 100
+
+    if data_loading_badput > total_job_time or data_loading_badput < 0.0:
+      raise ValueError(
+          'Total badput due to data loading is invalid. Please fix the'
+          ' logging entries.'
+      )
+    badput_breakdown[BadputType.DATA_LOADING] = (
+        data_loading_badput / total_job_time
     ) * 100
 
     return badput_breakdown

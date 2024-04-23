@@ -728,6 +728,60 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_badput_calculator_training_preparation(self):
+    """Test function to validate computation of badput due to training preparation."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    # Mock training preparation.
+    self.goodput_recorder.record_training_preparation_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    self.goodput_recorder.record_training_preparation_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+
+    # Mock training.
+    step_start_time = (
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time.
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+    )
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Badput with selection.
+    computed_badput_breakdown = (
+        self.goodput_calculator.get_job_badput_breakdown()
+    )
+    expected_badput_due_to_training_preparation = (
+        (_TEST_TRAINING_PREPARATION_TIME.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(goodput.BadputType.TRAINING_PREP, computed_badput_breakdown)
+    self.assertAlmostEqual(
+        computed_badput_breakdown[goodput.BadputType.TRAINING_PREP],
+        expected_badput_due_to_training_preparation,
+        delta=0.1,
+    )
+
 
 if __name__ == '__main__':
   googletest.main()

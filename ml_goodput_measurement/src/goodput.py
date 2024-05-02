@@ -352,15 +352,18 @@ class GoodputCalculator:
     else:
       self._cloud_logger = _CloudLogger(job_name, logger_name)
 
-  def _get_total_productive_training_time(self, entries: list[Any]) -> float:
-    """Helper function to compute the total productive training time.
+  def _get_total_productive_and_unproductive_time(
+      self, entries: list[Any]
+  ) -> tuple[float, dict[BadputType, float]]:
+    """Helper function to compute the total productive training time and unproductive time.
 
     Args:
       entries: Cloud Logging entries from user-specified logger for a specific
         job.
 
     Returns:
-      The job's total productive training time.
+      The job's total productive training time and a dictionary of some Badput
+      Types with their associated unproductive times.
     """
 
     def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
@@ -388,13 +391,16 @@ class GoodputCalculator:
           len(anomalous_step_times) * normal_step_mean
       )
 
-    def get_segment_productive_time(
+    def get_segment_productive_and_unproductive_time(
         step_start_data: dict[int, float], curr_step: int
-    ) -> float:
-      """Helper function to compute the segment productive time.
+    ) -> tuple[float, dict[BadputType, float]]:
+      """Helper function to compute the segment productive and unproductive time.
 
       This method computes productive training time between the beginning of a
       segment of step start time data and current step.
+
+      This function also returns a dictionary of some Badput Types and the
+      unproductive time associated with these.
 
       Args:
         step_start_data: Dictionary containing a segment of step time data.
@@ -402,10 +408,11 @@ class GoodputCalculator:
           calculated.
 
       Returns:
-        The job's segment productive training time.
+        The job's segment productive training time and segment unproductive
+        time.
       """
       if curr_step == 0:
-        return 0.0
+        return (0.0, {})
 
       segment_productive_total_time = 0.0
       first_step_time = 0.0
@@ -429,12 +436,12 @@ class GoodputCalculator:
           steps_in_segment += 1
 
       if steps_in_segment == 0:
-        return 0.0
+        return (0.0, {})
 
       if steps_in_segment == 1:
         # Extra step time is not computable with only one step, so it is not
         # discounted in this case.
-        return first_step_time
+        return (first_step_time, {})
 
       # Compute Badput from the first step
       first_step_extra_time = 0.0
@@ -448,11 +455,28 @@ class GoodputCalculator:
         extra_time_from_anomalous_steps = get_extra_time_from_anomalous_steps(
             step_times
         )
-      return (
+      total_segment_productive_time = (
           segment_productive_total_time
           - first_step_extra_time
           - extra_time_from_anomalous_steps
       )
+      total_segment_unproductive_time = {
+          BadputType.PROGRAM_STARTUP: first_step_extra_time
+      }
+      return (
+          total_segment_productive_time,
+          total_segment_unproductive_time,
+      )
+
+    def _accumulate_segment_unproductive_time(
+        segment_unproductive_time: dict[BadputType, float],
+        total_unproductive_time: dict[BadputType, float],
+    ):
+      for badput_type, unproductive_time in segment_unproductive_time.items():
+        if badput_type in total_unproductive_time:
+          total_unproductive_time[badput_type] += unproductive_time
+        else:
+          total_unproductive_time[badput_type] = unproductive_time
 
     # Build a deserialized dictionary from cloud logging entries to store step
     # start times. The dictionary maps from step count to start time and will be
@@ -465,6 +489,7 @@ class GoodputCalculator:
     # additional time that was counted as productive but lost due to a
     # disruption.
     productive_training_time = 0.0
+    total_unproductive_time = {}
     step_start_data = {}
     job_end_time = None
     for payload in entries:
@@ -477,8 +502,14 @@ class GoodputCalculator:
           # all progress till Step (curr_step - 1) has been preserved. So we
           # can get the productive time since the previous start/restart and
           # then clear the step_start_data dict.
-          productive_training_time += get_segment_productive_time(
-              step_start_data, curr_step
+          segment_productive_time, segment_unproductive_time = (
+              get_segment_productive_and_unproductive_time(
+                  step_start_data, curr_step
+              )
+          )
+          productive_training_time += segment_productive_time
+          _accumulate_segment_unproductive_time(
+              segment_unproductive_time, total_unproductive_time
           )
           step_start_data = {curr_step: payload[_STEP_START_TIME]}
 
@@ -487,11 +518,15 @@ class GoodputCalculator:
         job_end_time = payload[_JOB_END_TIME]
 
     if not step_start_data:
-      return 0.0
+      return 0.0, {}
 
     last_step = max(list(step_start_data.keys()))
-    productive_training_time += get_segment_productive_time(
-        step_start_data, last_step
+    segment_productive_time, segment_unproductive_time = (
+        get_segment_productive_and_unproductive_time(step_start_data, last_step)
+    )
+    productive_training_time += segment_productive_time
+    _accumulate_segment_unproductive_time(
+        segment_unproductive_time, total_unproductive_time
     )
 
     if job_end_time is not None:
@@ -501,7 +536,7 @@ class GoodputCalculator:
           datetime.datetime.utcnow().timestamp() - step_start_data[last_step]
       )
 
-    return productive_training_time
+    return productive_training_time, total_unproductive_time
 
   def _get_total_job_time(self, entries: list[Any]) -> float:
     """Helper function to compute the total job runtime.
@@ -560,7 +595,9 @@ class GoodputCalculator:
           'Total job time is zero, Goodput cannot be calculated. Please fix the'
           ' logging entries.'
       )
-    productive_training_time = self._get_total_productive_training_time(entries)
+    productive_training_time, _ = (
+        self._get_total_productive_and_unproductive_time(entries)
+    )
     if (
         productive_training_time < 0.0
         or productive_training_time > total_job_time

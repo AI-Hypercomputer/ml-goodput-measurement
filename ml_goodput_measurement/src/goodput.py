@@ -716,4 +716,13 @@ class GoodputCalculator:
         data_loading_badput / total_job_time
     ) * 100
 
+    # Collect unproductive time from step times.
+    _, unproductive_time = self._get_total_productive_and_unproductive_time(
+        entries
+    )
+    if BadputType.PROGRAM_STARTUP in unproductive_time:
+      badput_breakdown[BadputType.PROGRAM_STARTUP] = (
+          unproductive_time[BadputType.PROGRAM_STARTUP] / total_job_time
+      ) * 100
+
     return badput_breakdown

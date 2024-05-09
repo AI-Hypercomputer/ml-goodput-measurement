@@ -570,21 +570,30 @@ class GoodputCalculator:
     # calculated. Caller of this function should raise an error if this happens.
     return 0.0
 
-  def get_job_goodput(self):
+  def get_job_goodput(
+      self, include_badput_breakdown=False
+  ) -> tuple[float, dict[BadputType, float]]:
     """Method to get the cumulative Goodput of the job computed until now.
 
     If the application is interested in retrieving the overall Goodput of the
     job throughout its lifetime, this method provides the singular Goodput
     computation for the entire job.
 
+    Args:
+      include_badput_breakdown: Whether or not to return the badput breakdown.
+        If False, returns {} for the badput breakdown.
+
     Returns:
-      Goodput percentage of the entire job.
+      Goodput percentage of the entire job and optionally the badput breakdown.
 
     Raises:
       ValueError if computed total job time is zero. In this case, Goodput
       cannot be computed.
       ValueError if productive training time is invalid.
     """
+    # TODO(b/339234919): Combine certain operations in `_get_total_job_time`,
+    # `_get_total_productive_and_unproductive_time` and
+    # `get_job_badput_breakdown` so fewer passes of the data are performed.
     entries = self._cloud_logger.read_cloud_logging_entries()
     total_job_time = self._get_total_job_time(entries)
     # No calculations can be made if total job time is zero. This can happen if
@@ -605,7 +614,10 @@ class GoodputCalculator:
       raise ValueError(
           'Productive training time is invalid. Please fix the logging entries.'
       )
-    return (float(productive_training_time) / total_job_time) * 100
+
+    return (
+        float(productive_training_time) / total_job_time
+    ) * 100, self.get_job_badput_breakdown() if include_badput_breakdown else {}
 
   def get_job_goodput_interval(self, interval_start, interval_end):
     """Method to get the Goodput of the job within an interval window.

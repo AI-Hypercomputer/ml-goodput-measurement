@@ -1,4 +1,3 @@
-
 # Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,3 +13,4 @@
 # limitations under the License.
 
 from cloud_tpu_goodput.ml_goodput_measurement.src import goodput
+from cloud_tpu_goodput.ml_goodput_measurement.src import monitoring

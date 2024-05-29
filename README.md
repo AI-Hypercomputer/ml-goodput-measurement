@@ -25,19 +25,35 @@
  insight into the productivity of ML workloads and utilization of compute
  resources.
 
+ The package also exposes Goodput Monitoring APIs which allow asynchronous query
+ and export of the job's Goodput to Tensorboard with configurable upload interval.
+
 ## Components
 
 
- The ML Goodput Measurement library consists of two main components: 
- the `GoodputRecorder` and the `GoodputCalculator`. The `GoodputRecorder`
+ The ML Goodput Measurement library consists of the following main components: 
+
+  - `GoodputRecorder`
+
+  - `GoodputCalculator`
+  - `GoodputMonitor`
+
+
+ The `GoodputRecorder`
  exposes APIs to the client to export key timestamps while a training job makes
  progress, namely APIs that allow logging of productive step time and total job
  run time. The library will serialize and store this data in Google Cloud
- Logging. The `GoodputCalculator` exposes APIs to compute Goodput based on the
+ Logging.
+
+ The `GoodputCalculator` exposes APIs to compute Goodput based on the
  recorded data. Cloud Logging handles its internal operations asynchronously.
  The recommended way to compute Goodput is to run an analysis program separate
  from the training application, either on a CPU instance or on the users'
  development machine.
+
+ The `GoodputMonitor` exposes APIs to query and upload goodput data to
+ Tensorboard asynchronously. It does this by instantiating a `GoodputCaluclator`
+ under the hood.
 
 ## Installation
 
@@ -177,5 +193,46 @@ Finally, call the `get_job_goodput` API to retrieve Goodput for the entire job r
 ```python
 total_goodput = goodput_calculator.get_job_goodput()
 print(f"Total job goodput: {total_goodput:.2f}%")
+```
+
+### Monitor Goodput with `GoodputMonitor`
+
+In order to monitor the Goodput of a job run on Tensorboard, all you need to do
+is instantiate a `GoodputMonitor` object with the job's run name, cloud logger 
+name and Goodput monitoring configurations (as described below). Then call the 
+`start_goodput_uploader` API to asynchronously query and upload measured Goodput
+to the specified Tensorboard directory. 
+
+
+#### Create a `GoodputMonitor` object
+
+Create a `GoodputMonitor` object with the following parameters:
+
+ 1. `job_name`: The full run name of the job.
+ 2. `logger_name`: The name of the Cloud Logging logger object (created in the previous step).
+ 3. `tensorboard_dir`: The directory to write TensorBoard data to.
+ 4. `upload_interval`: The time interval at which to query and upload data to TensorBoard.
+ 5. `monitoring_enabled`: Whether or not monitoring is enabled. If the application is
+      interested in monitoring Goodput, it should set this value to True. Only one worker 
+      should enable monitoring.
+
+> **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
+   In JAX, for example, the check could be `if jax.process_index() == 0`
+
+For example:
+
+```python
+goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own logger name.
+goodput_monitoring_enabled = config.monitor_goodput and jax.process_index() == 0 # Check for configs whether or not the enable monitoring.
+
+goodput_monitor = goodput.GoodputMonitor(job_name=config.run_name, logger_name=logger_name, tensorboard_dir=config.tensorboard_dir, upload_interval=config.goodput_upload_interval_seconds, monitoring_enabled=goodput_monitoring_enabled)
+```
+
+#### Start asynchronous "query and upload" of Goodput
+
+Call the `start_goodput_uploader` API to spin off a thread which continuously queries and uploads Goodput.
+
+```python
+goodput_monitor.start_goodput_uploader()
 ```
 

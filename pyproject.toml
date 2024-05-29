@@ -14,7 +14,7 @@
 
 [project]
 name = "ml_goodput_measurement"
-version = "0.0.2"
+version = "0.0.3"
 authors = [
   { name="Cloud TPU Team", email="cloud-tpu-eng@google.com" },
 ]
@@ -35,6 +35,7 @@ dependencies = [
   "google-cloud-logging>=3.5.0",
   "numpy",
   "scipy",
+  "tensorboard",
 ]
 
 [project.urls]

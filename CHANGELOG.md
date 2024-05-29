@@ -21,6 +21,17 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.0.3] - 2024-05-28
+* Compute and discount Badput from first step after start or restart.
+* Compute and discount Badput due to anomalous step times (Pathways only).
+* Badput recording APIs
+* Some Badput computation APIs (TPU initialization , training preparation, data loading, program startup)
+* Goodput monitoring API to asynchronously query and upload Goodput to Tensorboard.
+* Bug Fixes
+  * Fix Goodput calculation with disruptions
+  * Fix some Cloud Logging latency and batching issues.
+
+
 ## [0.0.2] - 2024-02-29
 * Bug Fixes
   * Fixes a typing mismatch in total step time calculation.
@@ -30,5 +41,6 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.0.3]: https://github.com/google/cloud_tpu_goodput/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/google/cloud_tpu_goodput/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/google/cloud_tpu_goodput/releases/tag/v0.0.1

@@ -491,8 +491,12 @@ class GoodputCalculator:
     productive_training_time = 0.0
     total_unproductive_time = {}
     step_start_data = {}
+    job_start_time = None
     job_end_time = None
     for payload in entries:
+      if _JOB_START_TIME in payload:
+        # Keep track of the latest start to compute badput due to disruption.
+        job_start_time = payload[_JOB_START_TIME]
       if _STEP_START_TIME in payload:
         curr_step = int(payload[_STEP_COUNT])
         if curr_step not in step_start_data:
@@ -508,6 +512,34 @@ class GoodputCalculator:
               )
           )
           productive_training_time += segment_productive_time
+          # Since the current step has been recorded again, the progress
+          # between the previously recorded curr_step and recently recorded
+          # curr_step has been lost to a disruption and partially recovered
+          # due to a checkpoint of curr_step - 1. Accumulate the lost time in
+          # this segment as unproductive time.
+          # Note this unproductive time is divided into two buckets:
+          #   1. Wasted training progress after the last successfully
+          #      checkpointed step and the disruption time until the job
+          #      restarts.
+          #   2. TPU re-init, training prep, data loading, program startup,
+          #      checkpoint loading etc. after the job restarts and before
+          #      training progress resumes.
+
+          # The first bucket can be calculated as the time between the start
+          # time of curr_step and the job restart time immediately prior.
+          if job_start_time is not None:
+            wasted_progress_from_disruption = (
+                job_start_time - step_start_data[curr_step]
+            )
+            segment_unproductive_time[
+                BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+            ] = wasted_progress_from_disruption
+
+          # The second bucket is individually computed either from recorded
+          # logs (TPU initialization, training preparation, data loading) or
+          # computed from the first step time after start or restart
+          # (segment unproductive time). All unproductive time is accumulated
+          # as we go.
           _accumulate_segment_unproductive_time(
               segment_unproductive_time, total_unproductive_time
           )
@@ -736,5 +768,15 @@ class GoodputCalculator:
       badput_breakdown[BadputType.PROGRAM_STARTUP] = (
           unproductive_time[BadputType.PROGRAM_STARTUP] / total_job_time
       ) * 100
+    else:
+      badput_breakdown[BadputType.PROGRAM_STARTUP] = 0.0
+
+    if BadputType.WASTED_PROGRESS_FROM_DISRUPTION in unproductive_time:
+      badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION] = (
+          unproductive_time[BadputType.WASTED_PROGRESS_FROM_DISRUPTION]
+          / total_job_time
+      ) * 100
+    else:
+      badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION] = 0.0
 
     return badput_breakdown

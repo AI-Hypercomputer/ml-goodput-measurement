@@ -1022,6 +1022,114 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_badput_calculator_wasted_progress_and_disruptions(self):
+    """Validate computation of badput due to wasted progress and disruptions."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    # Mock training preparation.
+    self.goodput_recorder.record_training_preparation_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    self.goodput_recorder.record_training_preparation_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    # Mock data loading.
+    self.goodput_recorder.record_data_loading_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    self.goodput_recorder.record_data_loading_end_time(
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    # Mock training.
+    step_start_time = (
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+    # All steps but first progress with average step time.
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      # Add startup badput during the first step
+      if step == 0:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    # Simulate a 30-second disruption.
+    disruption_time = datetime.timedelta(seconds=30)
+    job_restart_time = step_start_time + disruption_time
+    self.goodput_recorder.record_job_start_time(job_restart_time)
+    step_start_time = (
+        job_restart_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    restart_from_step = 2
+    # All steps but first progress with average step time.
+    for step in range(restart_from_step, _TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      if step == restart_from_step:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + disruption_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Badput.
+    computed_badput_breakdown = (
+        self.goodput_calculator.get_job_badput_breakdown()
+    )
+    wasted_progress_and_disruption_time = (
+        disruption_time
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+    expected_badput_due_to_disruptions = (
+        (wasted_progress_and_disruption_time.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
+        computed_badput_breakdown,
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[
+            goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+        ],
+        expected_badput_due_to_disruptions,
+        delta=0.1,
+    )
+
 
 if __name__ == '__main__':
   googletest.main()

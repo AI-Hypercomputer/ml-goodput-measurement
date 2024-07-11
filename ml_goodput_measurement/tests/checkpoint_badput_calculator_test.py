@@ -1,10 +1,10 @@
-"""Tests for checkpoint breakdown."""
+"""Tests for checkpoint badput calculator."""
 
 import dataclasses
 from typing import Optional
 
 from absl.testing import absltest
-from cloud_tpu_goodput.ml_goodput_measurement.src import checkpoint_breakdown
+from cloud_tpu_goodput.ml_goodput_measurement.src import checkpoint_badput_calculator
 import google.cloud.logging as google_cloud_logging
 import mock
 
@@ -54,13 +54,13 @@ class CheckpointBadputCalculatorTest(absltest.TestCase):
     """Setup for the test."""
     super().setUp()
     mock_gcloud_client = mock.create_autospec(google_cloud_logging.Client)
-    options = checkpoint_breakdown.CheckpointLoggerOptions(
+    options = checkpoint_badput_calculator.CheckpointLoggerOptions(
         job_name=_JOB_NAME,
         logger_name=_LOGGER_NAME,
         client=mock_gcloud_client,
     )
     self.checkpoint_badput_calculator = (
-        checkpoint_breakdown.CheckpointBadputCalculator(options)
+        checkpoint_badput_calculator.CheckpointBadputCalculator(options)
     )
     for i in range(1, 5):
       self.checkpoint_badput_calculator.entries.append(
@@ -81,14 +81,14 @@ class CheckpointBadputCalculatorTest(absltest.TestCase):
           )
       )
 
-  def test_checkpoint_breakdown(self):
+  def test_checkpoint_badput_calculator(self):
     total_time = (
         self.checkpoint_badput_calculator.calculate_blocking_checkpoint_time()
     )
     expected_total_time = len(self.checkpoint_badput_calculator.entries)
     self.assertEqual(total_time, expected_total_time)
 
-  def test_checkpoint_breakdown_with_preemption(self):
+  def test_checkpoint_badput_calculator_preemption(self):
     i = len(self.checkpoint_badput_calculator.entries) + 1
     preemption_entry = dataclasses.asdict(
         MockStepStatistics(

@@ -1,4 +1,4 @@
-"""Checkpoint breakdown class."""
+"""Checkpoint Badput Calculator class."""
 
 import dataclasses
 from typing import Dict, List, Optional
@@ -30,14 +30,14 @@ _CLOUD_LOGGING_PAGE_SIZE = 10000
 
 @dataclasses.dataclass
 class CheckpointLoggerOptions:
-  """Breakdown options."""
+  """Checkpoint logger options."""
   job_name: str = _JOB_NAME
   logger_name: str = _LOGGER_NAME
   client: Optional[google_cloud_logging.Client] = None
 
 
 class CheckpointBadputCalculator:
-  """Checkpoint breakdown class."""
+  """Checkpoint Badput Calculator class."""
 
   def __init__(
       self, options: CheckpointLoggerOptions = CheckpointLoggerOptions()

@@ -354,16 +354,17 @@ class GoodputCalculator:
 
   def _get_total_productive_and_unproductive_time(
       self, entries: list[Any]
-  ) -> tuple[float, dict[BadputType, float]]:
-    """Helper function to compute the total productive training time and unproductive time.
+  ) -> tuple[float, dict[BadputType, float], int]:
+    """Helper function to compute the total productive training time, unproductive time and the last step recorded till now.
 
     Args:
       entries: Cloud Logging entries from user-specified logger for a specific
         job.
 
     Returns:
-      The job's total productive training time and a dictionary of some Badput
-      Types with their associated unproductive times.
+      A tuple of the total productive training time, the total unproductive time
+      (dict of BadputType and unproductive time) and the last step recorded till
+      now.
     """
 
     def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
@@ -550,7 +551,7 @@ class GoodputCalculator:
         job_end_time = payload[_JOB_END_TIME]
 
     if not step_start_data:
-      return 0.0, {}
+      return 0.0, {}, 0
 
     last_step = max(list(step_start_data.keys()))
     segment_productive_time, segment_unproductive_time = (
@@ -568,7 +569,10 @@ class GoodputCalculator:
           datetime.datetime.utcnow().timestamp() - step_start_data[last_step]
       )
 
-    return productive_training_time, total_unproductive_time
+    # Return a tuple of the total productive training time, the total
+    # unproductive time (dict of BadputType and unproductive time) and the last
+    # step recorded.
+    return productive_training_time, total_unproductive_time, last_step
 
   def _get_total_job_time(self, entries: list[Any]) -> float:
     """Helper function to compute the total job runtime.
@@ -604,19 +608,27 @@ class GoodputCalculator:
 
   def get_job_goodput(
       self, include_badput_breakdown=False
-  ) -> tuple[float, dict[BadputType, float]]:
-    """Method to get the cumulative Goodput of the job computed until now.
+  ) -> tuple[float, dict[BadputType, float], int]:
+    """Method to get the cumulative Goodput and Badput breakdown of the job computed until now.
 
     If the application is interested in retrieving the overall Goodput of the
     job throughout its lifetime, this method provides the singular Goodput
     computation for the entire job.
+
+    This method also returns the Badput breakdown of the job if
+    `include_badput_breakdown` is set to True.
+
+    Additionaly, this method returns the last step recorded for the job. This is
+    primarily used for improving monitoring and observability of the job's
+    overall Goodput as a function of number of executed steps.
 
     Args:
       include_badput_breakdown: Whether or not to return the badput breakdown.
         If False, returns {} for the badput breakdown.
 
     Returns:
-      Goodput percentage of the entire job and optionally the badput breakdown.
+      A tuple of the job's Goodput, optionally the Badput breakdown and the last
+      step recorded for the job.
 
     Raises:
       ValueError if computed total job time is zero. In this case, Goodput
@@ -636,7 +648,7 @@ class GoodputCalculator:
           'Total job time is zero, Goodput cannot be calculated. Please fix the'
           ' logging entries.'
       )
-    productive_training_time, _ = (
+    productive_training_time, _, last_step = (
         self._get_total_productive_and_unproductive_time(entries)
     )
     if (
@@ -646,10 +658,13 @@ class GoodputCalculator:
       raise ValueError(
           'Productive training time is invalid. Please fix the logging entries.'
       )
-
-    return (
-        float(productive_training_time) / total_job_time
-    ) * 100, self.get_job_badput_breakdown() if include_badput_breakdown else {}
+    # Return a tuple of calculated Goodput & Badput of the job till now and the
+    # last recorded step.
+    job_goodput = (float(productive_training_time) / total_job_time) * 100
+    job_badput_breakdown = (
+        self.get_job_badput_breakdown() if include_badput_breakdown else {}
+    )
+    return job_goodput, job_badput_breakdown, last_step
 
   def get_job_goodput_interval(self, interval_start, interval_end):
     """Method to get the Goodput of the job within an interval window.
@@ -761,7 +776,7 @@ class GoodputCalculator:
     ) * 100
 
     # Collect unproductive time from step times.
-    _, unproductive_time = self._get_total_productive_and_unproductive_time(
+    _, unproductive_time, _ = self._get_total_productive_and_unproductive_time(
         entries
     )
     if BadputType.PROGRAM_STARTUP in unproductive_time:

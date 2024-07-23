@@ -68,11 +68,10 @@ class GoodputMonitor:
     if self._uploader_thread_running:
       self.stop_goodput_uploader()
 
-  def _write_to_tensorboard(self, job_goodput: float):
+  def _write_to_tensorboard(self, job_goodput: float, last_step: int):
     if self._writer is not None:
-      timestamp = datetime.datetime.now().timestamp()
       self._writer.add_scalar(
-          _TENSORBOARD_METRIC_LABEL, job_goodput, walltime=timestamp
+          _TENSORBOARD_METRIC_LABEL, job_goodput, last_step
       )
       self._writer.flush()
 
@@ -81,8 +80,8 @@ class GoodputMonitor:
     while not self._termination_event.is_set():
       time.sleep(self._upload_interval)
       try:
-        job_goodput, _ = self._goodput_calculator.get_job_goodput()
-        self._write_to_tensorboard(job_goodput)
+        job_goodput, _, last_step = self._goodput_calculator.get_job_goodput()
+        self._write_to_tensorboard(job_goodput, last_step)
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error(
             'Error while querying and uploading goodput to Tensorboard. This'

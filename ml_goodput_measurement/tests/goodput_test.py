@@ -109,13 +109,14 @@ class GoodputTest(googletest.TestCase):
     self._mock_sample_program()
     # Get the computed Goodput from the library and compare with expected
     # result.
-    computed_goodput, _ = self.goodput_calculator.get_job_goodput()
+    computed_goodput, _, total_steps = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
         (_TEST_STEP_TIME * _TEST_TOTAL_STEPS)
         / (_TEST_JOB_END_TIME - _TEST_JOB_START_TIME)
         * 100
     )
     self.assertEqual(computed_goodput, expected_goodput)
+    self.assertEqual(total_steps, _TEST_TOTAL_STEPS - 1)
 
   def test_goodput_with_startup_badput(self):
     """Test function to validate goodput with startup badput."""
@@ -146,7 +147,7 @@ class GoodputTest(googletest.TestCase):
     # Get the computed Goodput from the library and compare with expected
     # result.
 
-    computed_goodput, _ = self.goodput_calculator.get_job_goodput()
+    computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
         (
             _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
@@ -218,7 +219,7 @@ class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
     query_time = total_time.total_seconds() + seconds_before_query
 
     time.sleep(query_time)
-    computed_goodput, _ = self.goodput_calculator.get_job_goodput()
+    computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
         (
             (steps_before_query - 1) * _TEST_STEP_TIME.total_seconds()
@@ -291,7 +292,7 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
     query_time = total_time.total_seconds() + seconds_before_query
 
     time.sleep(query_time)
-    computed_goodput, _ = self.goodput_calculator.get_job_goodput()
+    computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
         (
             _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
@@ -354,7 +355,7 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
     query_time = total_time.total_seconds() + seconds_before_query
 
     time.sleep(query_time)
-    computed_goodput, _ = self.goodput_calculator.get_job_goodput()
+    computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
         (
             _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
@@ -431,7 +432,7 @@ class GoodputPathwaysTest(googletest.TestCase):
         + _TEST_ANOMALOUS_STEP_TIME
     )
 
-    computed_goodput, _ = self.goodput_calculator.get_job_goodput()
+    computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
         (_TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds())
         / total_time.total_seconds()
@@ -500,7 +501,7 @@ class GoodputPathwaysTest(googletest.TestCase):
         + _TEST_ANOMALOUS_STEP_TIME * 2
     )
 
-    computed_goodput, _ = self.goodput_calculator.get_job_goodput()
+    computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
         (2 * _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds())
         / total_time.total_seconds()

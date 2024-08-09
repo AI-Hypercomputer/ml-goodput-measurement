@@ -4,8 +4,8 @@ This file contains all the utilities to monitor and upload goodput data of a
 user workload to Tensorboard asynchronously.
 """
 
-import datetime
 import logging
+import os
 import threading
 import time
 
@@ -49,7 +49,7 @@ class GoodputMonitor:
 
     self._job_name = job_name
     self._logger_name = logger_name
-    self._tensorboard_dir = tensorboard_dir
+    self._tensorboard_dir = os.path.join(tensorboard_dir, "goodput")
     self._upload_interval = upload_interval
     self._goodput_calculator = GoodputCalculator(
         job_name=self._job_name,

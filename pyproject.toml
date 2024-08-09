@@ -35,7 +35,7 @@ dependencies = [
   "google-cloud-logging>=3.5.0",
   "numpy",
   "scipy",
-  "tensorboard",
+  "tensorboardx",
 ]
 
 [project.urls]

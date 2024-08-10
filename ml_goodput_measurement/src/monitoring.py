@@ -27,6 +27,7 @@ class GoodputMonitor:
       tensorboard_dir: str,
       upload_interval: int,
       monitoring_enabled: bool = False,
+      pathway_enabled: bool = False,
   ):
     """Initializes the GoodputMonitor.
 
@@ -39,6 +40,7 @@ class GoodputMonitor:
           interested in monitoring Goodput, it should set this value to True if
           monitoring from TPU worker 0 andthe application's configurations
           request Goodput monitoring.
+        pathway_enabled: Whether the application is using Pathways.
     """
     if not monitoring_enabled:
       logger.info(
@@ -54,6 +56,7 @@ class GoodputMonitor:
     self._goodput_calculator = GoodputCalculator(
         job_name=self._job_name,
         logger_name=self._logger_name,
+        using_pathways=pathway_enabled,
     )
     self._writer = writer.SummaryWriter(self._tensorboard_dir)
 

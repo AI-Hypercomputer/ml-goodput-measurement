@@ -9,10 +9,12 @@ import os
 import threading
 import time
 
-from cloud_tpu_goodput.ml_goodput_measurement.src.goodput import GoodputCalculator
+from cloud_tpu_goodput.ml_goodput_measurement.src.goodput import BadputType, GoodputCalculator
 from tensorboardX import writer
 
-_TENSORBOARD_METRIC_LABEL = 'goodput'
+_TENSORBOARD_GCS_SUBDIR = 'goodput'
+_TENSORBOARD_GOODPUT_LABEL = 'goodput'
+_TENSORBOARD_BADPUT_LABEL = 'badput'
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ class GoodputMonitor:
       upload_interval: int,
       monitoring_enabled: bool = False,
       pathway_enabled: bool = False,
+      include_badput_breakdown=False,
   ):
     """Initializes the GoodputMonitor.
 
@@ -41,6 +44,8 @@ class GoodputMonitor:
           monitoring from TPU worker 0 andthe application's configurations
           request Goodput monitoring.
         pathway_enabled: Whether the application is using Pathways.
+        include_badput_breakdown: Whether to query and upload badput breakdown
+          data to Tensorboard.
     """
     if not monitoring_enabled:
       logger.info(
@@ -51,7 +56,9 @@ class GoodputMonitor:
 
     self._job_name = job_name
     self._logger_name = logger_name
-    self._tensorboard_dir = os.path.join(tensorboard_dir, "goodput")
+    self._tensorboard_dir = os.path.join(
+        tensorboard_dir, _TENSORBOARD_GCS_SUBDIR
+    )
     self._upload_interval = upload_interval
     self._goodput_calculator = GoodputCalculator(
         job_name=self._job_name,
@@ -59,6 +66,7 @@ class GoodputMonitor:
         using_pathways=pathway_enabled,
     )
     self._writer = writer.SummaryWriter(self._tensorboard_dir)
+    self._include_badput_breakdown = include_badput_breakdown
 
     # Flag to signal the daemon thread if it exists when to initate
     # shutdown and wait for termination.
@@ -71,11 +79,39 @@ class GoodputMonitor:
     if self._uploader_thread_running:
       self.stop_goodput_uploader()
 
-  def _write_to_tensorboard(self, job_goodput: float, last_step: int):
+  def _write_to_tensorboard(
+      self,
+      job_goodput: float,
+      badput_breakdown: dict[BadputType, float],
+      last_step: int,
+  ):
+    """Writes goodput and badput breakdown to Tensorboard."""
+    self._write_goodput_to_tensorboard(job_goodput, last_step)
+    if self._include_badput_breakdown:
+      self._write_badput_to_tensorboard(badput_breakdown, last_step)
+
+  def _write_goodput_to_tensorboard(self, job_goodput: float, last_step: int):
     if self._writer is not None:
       self._writer.add_scalar(
-          _TENSORBOARD_METRIC_LABEL, job_goodput, last_step
+          _TENSORBOARD_GOODPUT_LABEL, job_goodput, last_step
       )
+      self._writer.flush()
+
+  def _write_badput_to_tensorboard(
+      self, job_badput_breakdown: dict[BadputType, float], last_step: int
+  ):
+    def _get_badput_label(badput_type: BadputType) -> str:
+      return str(badput_type.name).lower()
+
+    if self._writer is not None:
+      for badput_type, badput_percentage in job_badput_breakdown.items():
+        label_suffix = _get_badput_label(badput_type)
+        self._writer.add_scalar(
+            _TENSORBOARD_BADPUT_LABEL + '/' + label_suffix,
+            float(badput_percentage),
+            last_step,
+            display_name=label_suffix,
+        )
       self._writer.flush()
 
   def _query_and_upload_goodput(self):
@@ -83,8 +119,12 @@ class GoodputMonitor:
     while not self._termination_event.is_set():
       time.sleep(self._upload_interval)
       try:
-        job_goodput, _, last_step = self._goodput_calculator.get_job_goodput()
-        self._write_to_tensorboard(job_goodput, last_step)
+        job_goodput, job_badput_breakdown, last_step = (
+            self._goodput_calculator.get_job_goodput(
+                include_badput_breakdown=self._include_badput_breakdown
+            )
+        )
+        self._write_to_tensorboard(job_goodput, job_badput_breakdown, last_step)
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error(
             'Error while querying and uploading goodput to Tensorboard. This'

@@ -18,12 +18,12 @@
 ## Overview
 
  ML Goodput Measurement is a library intended to be used with Cloud TPU to log the
- necessary information and query a job's Goodput. It can be pip installed to
- import its modules, and retrieve information about a training job's overall
- productive Goodput. The package exposes API interfaces to log useful
- information from the user application and query Goodput for the job run, gain
- insight into the productivity of ML workloads and utilization of compute
- resources.
+ necessary information and query a job's Goodput and Badput Breakdown. It can be pip
+ installed to import its modules, and retrieve information about a training job's
+ overall productive Goodput and sources of Badput. The package exposes API
+ interfaces to log useful information from the user application and query Goodput
+ for the job run, gain insight into the productivity of ML workloads and utilization
+ of compute resources.
 
  The package also exposes Goodput Monitoring APIs which allow asynchronous query
  and export of the job's Goodput to Tensorboard with configurable upload interval.
@@ -75,6 +75,8 @@ project, then do the following:
 
 2. Make sure that billing is enabled for your Google Cloud project. Instructions can be found [here](https://cloud.google.com/billing/docs/how-to/verify-billing-enabled#console)
 
+3. [Enable](https://console.cloud.google.com/flows/enableapi?apiid=logging.googleapis.com&_ga=2.27841276.1571868865.1726250448-123998259.1726107009) the Cloud Logging API.
+
 To run your training on Cloud TPU, set up the Cloud TPU environment by following
 instructions [here](https://cloud.google.com/tpu/docs/setup-gcp-account).
 
@@ -88,6 +90,7 @@ To learn more about Google Cloud Logging, visit this [page](https://cloud.google
 
  ```python
  from ml_goodput_measurement import goodput
+ from ml_goodput_measurement import monitoring
  ```
 
 ### Define the name of the Google Cloud Logging logger.
@@ -166,6 +169,36 @@ For example:
  return state
  ```
 
+#### Record TPU Initialization, Training Preparation and Data Loading Time
+
+  - Use the recorder object to record TPU Initialization time using `record_tpu_init_start_time` and `record_tpu_init_end_time`.
+  - Use the recorder object to record Training Preparation time using `record_training_preparation_start_time` and `record_training_preparation_end_time`.
+  - Use the recorder object to record Data Loading time using `record_data_loading_start_time` and `record_data_loading_end_time`.
+
+
+  For example:
+
+  ```python
+  def train_loop(config, state=None):
+  goodput_recorder.record_tpu_init_start_time()
+  # Set up mesh, model, state, checkpoint manager…
+  goodput_recorder.record_tpu_init_end_time()
+  goodput_recorder.record_training_preparation_start_time()
+  # Set up training set, initialize functional train arguments and model parameters…
+  # Define the compilation
+  # Set up any metrics collectors
+  goodput_recorder.record_training_preparation_end_time()
+
+  for step in np.arange(start_step, config.steps):
+    goodput_recorder.record_data_loading_start_time()
+    example_batch = load_next_batch(data_iterator, example_batch, config)
+    goodput_recorder.record_data_loading_end_time()
+    goodput_recorder.record_step_start_time(step)
+    # Training step…
+
+  return state
+  ```
+
 ### Retrieve Goodput with `GoodputCalculator`
 
 In order to retrieve the Goodput of a job run, all you need to do is instantiate
@@ -188,11 +221,49 @@ goodput_calculator = goodput.GoodputCalculator(job_name=config.run_name, logger_
 
 #### Retrieve Goodput
 
-Finally, call the `get_job_goodput` API to retrieve Goodput for the entire job run.
+Finally, call the `get_job_goodput` API to retrieve Goodput for the entire job run. This API takes an optional parameter `include_badput_breakdown`. which defaults to `False`.
+
+The returned result is a tuple of the job’s Goodput at query-time, a dictionary mapping various sources of Badput and their corresponding percentages and the last recorded step. If `include_badput_breakdown` is not set, an empty dictionary for Badput is returned.
+
+
+If you are only interested in Goodput:
 
 ```python
-total_goodput = goodput_calculator.get_job_goodput()
+total_goodput, _, _ = goodput_calculator.get_job_goodput()
 print(f"Total job goodput: {total_goodput:.2f}%")
+```
+
+#### Retrieve Badput Breakdown
+
+Badput breakdown is dictionary representation of various sources of Badput mapped to its corresponding value. 
+Badput is the percentage of time spent by the job doing work that is not training to the total lifetime of the job. This includes time spent doing TPU initialization, training preparation, checkpoint loading, compilation or re-compilation, data loading, checkpoint saving and time lost due to disruptions.
+
+Following Badput Breakdown buckets are supported by the library at this time:
+
+```python
+# Supported Badput Types
+class BadputType(enum.Enum):
+ """The type of Badput."""
+ TPU_INITIALIZATION = 1
+ TRAINING_PREP = 2
+ PROGRAM_STARTUP = 3
+ DATA_LOADING = 4
+ UNPRODUCTIVE_CHECKPOINTING = 5
+ WASTED_PROGRESS_FROM_DISRUPTION = 6
+ OTHER = 7
+```
+
+If you are interested in retrieving Badput Breakdown along with Goodput:
+
+```python
+goodput, badput_breakdown, last_step = goodput_calculator.get_job_goodput(include_badput_breakdown=True)
+print(f"Last step recorded: {last_step}")
+print(f"Goodput: {goodput:.2f}%")
+print(f"Badput due to TPU initialization: {badput_breakdown[goodput.BadputType.TPU_INITIALIZATION]:.2f}%")
+print(f"Badput due to training preparation: {badput_breakdown[goodput.BadputType.TRAINING_PREP]:.2f}%")
+print(f"Badput due to program startup: {badput_breakdown[goodput.BadputType.PROGRAM_STARTUP]:.2f}%")
+print(f"Badput due to data loading: {badput_breakdown[goodput.BadputType.DATA_LOADING]:.2f}%")
+print(f"Badput due to disruption and wasted progress: {badput_breakdown[goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION]:.2f}%")
 ```
 
 ### Monitor Goodput with `GoodputMonitor`
@@ -215,6 +286,7 @@ Create a `GoodputMonitor` object with the following parameters:
  5. `monitoring_enabled`: Whether or not monitoring is enabled. If the application is
       interested in monitoring Goodput, it should set this value to True. Only one worker 
       should enable monitoring.
+ 6. `include_badput_breakdown`: Whether to query and upload badput breakdown data to Tensorboard.
 
 > **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
    In JAX, for example, the check could be `if jax.process_index() == 0`
@@ -225,7 +297,14 @@ For example:
 goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own logger name.
 goodput_monitoring_enabled = config.monitor_goodput and jax.process_index() == 0 # Check for configs whether or not the enable monitoring.
 
-goodput_monitor = goodput.GoodputMonitor(job_name=config.run_name, logger_name=logger_name, tensorboard_dir=config.tensorboard_dir, upload_interval=config.goodput_upload_interval_seconds, monitoring_enabled=goodput_monitoring_enabled)
+goodput_monitor = monitoring.GoodputMonitor(
+      job_name=config.run_name,
+      logger_name=logger_name,
+      tensorboard_dir=config.tensorboard_dir,
+      upload_interval=config.goodput_upload_interval_seconds,
+      monitoring_enabled=True,
+      include_badput_breakdown=True,
+    )
 ```
 
 #### Start asynchronous "query and upload" of Goodput

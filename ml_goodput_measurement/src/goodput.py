@@ -33,6 +33,7 @@ class _CloudLogger:
   Attributes:
     job_name: Name of a specific job.
     logger: The Cloud Logging logger object.
+    job_start_time: Start time of the job run.
   """
 
   def __init__(self, job_name: str, log_name: str):
@@ -46,6 +47,7 @@ class _CloudLogger:
     self.job_name = job_name
     logging_client = google.cloud.logging.Client()
     self.logger = logging_client.logger(log_name)
+    self.job_start_time = None
 
   def write_cloud_logging_entry(self, entry) -> None:
     """Writes an entry to the Cloud Logging logger at INFO level.
@@ -61,6 +63,34 @@ class _CloudLogger:
           severity='INFO',
       )
 
+  def _get_filter_msg(self) -> str:
+    """Gets the filter message for the Cloud Logging query."""
+    filter_entries = [
+        'severity=INFO',
+        f'jsonPayload.job_name="{self.job_name}"',
+    ]
+    # Add a filter to bind an end-time to the query window.
+    end_time = datetime.datetime.now(datetime.timezone.utc)
+    filter_entries.append(f'timestamp<="{end_time.isoformat()}"')
+
+    # Add a filter to bind a start-time to the query window (if available).
+    if self.job_start_time is not None:
+      start_time = self.job_start_time - datetime.timedelta(days=1)
+      if start_time.tzinfo is None:
+        start_time = self.job_start_time.replace(tzinfo=datetime.timezone.utc)
+      filter_entries.append(f'timestamp>="{start_time.isoformat()}"')
+    return ' AND '.join(filter_entries)
+
+  def _update_job_start_time(self, entries: list[Any]):
+    if self.job_start_time:
+      return
+    for entry in entries:
+      if _JOB_START_TIME in entry and self.job_start_time is None:
+        self.job_start_time = datetime.datetime.fromtimestamp(
+            entry[_JOB_START_TIME]
+        )
+        break
+
   def read_cloud_logging_entries(self):
     """Queries Cloud Logging entries for the specific job.
 
@@ -69,17 +99,14 @@ class _CloudLogger:
 
     """
     import google.cloud.logging   # pylint: disable=g-import-not-at-top
-    filter_entries = [
-        'severity=INFO',
-        f'jsonPayload.job_name="{self.job_name}"',
-    ]
-    filter_entries = ' AND '.join(filter_entries)
+
     entries = self.logger.list_entries(
-        filter_=filter_entries,
+        filter_=self._get_filter_msg(),
         order_by=google.cloud.logging.ASCENDING,
         page_size=_CLOUD_LOGGING_PAGE_SIZE,
     )
     entry_payload = [entry.payload for entry in entries]
+    self._update_job_start_time(entry_payload)
     return entry_payload
 
 

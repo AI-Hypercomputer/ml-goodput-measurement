@@ -9,7 +9,7 @@ import os
 import threading
 import time
 
-from cloud_tpu_goodput.ml_goodput_measurement.src.goodput import BadputType, GoodputCalculator
+from cloud_goodput.ml_goodput_measurement.src.goodput import BadputType, GoodputCalculator
 from tensorboardX import writer
 
 _TENSORBOARD_GCS_SUBDIR = 'goodput'

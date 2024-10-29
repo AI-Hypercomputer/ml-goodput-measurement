@@ -3,7 +3,7 @@
 import datetime
 import time
 
-from cloud_tpu_goodput.ml_goodput_measurement.src import goodput
+from cloud_goodput.ml_goodput_measurement.src import goodput
 
 from google3.testing.pybase import googletest
 

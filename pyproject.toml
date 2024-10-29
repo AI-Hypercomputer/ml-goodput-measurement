@@ -39,8 +39,8 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/google/cloud_tpu_goodput"
-"Bug Tracker" = "https://github.com/google/cloud_tpu_goodput/issues"
+"Homepage" = "https://github.com/AI-Hypercomputer/ml-goodput-measurement"
+"Bug Tracker" = "https://github.com/AI-Hypercomputer/ml-goodput-measurement/issues"
 
 [build-system]
 # Build system specify which backend is used to build/install the project

@@ -16,7 +16,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   `[Unreleased]` notes.
 * At the end of the file:
   * Define the new link url:
-  `[0.0.1]: https://github.com/google/cloud_tpu_goodput/compare/v1.0.0...v2.0.0`
+  `[0.0.1]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v1.0.0...v2.0.0`
   * Update the `[Unreleased]` url: `v1.0.0...HEAD` -> `v2.0.0...HEAD`
 
 -->
@@ -49,7 +49,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
-[0.0.4]: https://github.com/google/cloud_tpu_goodput/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/google/cloud_tpu_goodput/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/google/cloud_tpu_goodput/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/google/cloud_tpu_goodput/releases/tag/v0.0.1
+[0.0.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/releases/tag/v0.0.1

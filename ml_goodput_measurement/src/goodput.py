@@ -1,8 +1,8 @@
 """Goodput package API implementations.
 
-This file contains all the methods exposed through the cloud_tpu_goodput library
-for users to log necessary information to compute Goodput, and to query the
-computed Goodput.
+This file contains all the methods exposed through the ml-goodput-measurement
+library for users to log necessary information, query and monitor the computed
+Goodput and Badput metrics.
 """
 
 import datetime

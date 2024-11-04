@@ -6,7 +6,8 @@ from typing import Any, Dict, Optional
 from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
 
 _TIME_ENTRY = 'time'
-
+_JOB_START_TIME = 'job_start_time'
+_JOB_END_TIME = 'job_end_time'
 
 class GoodputCache:
   """Goodput Cache."""
@@ -15,11 +16,15 @@ class GoodputCache:
     self._cached_entries = []
     self._goodput_info = None
     self._last_entry_timestamp = None
+    self._job_start_time = None
+    self._job_end_time = None
 
   def update_cached_entries(self, entries: list[Any]):
     """Updated the cached entries."""
-    self._cached_entries = entries
+    self._cached_entries.extend(entries)
     self.update_last_entry_timestamp()
+    self.update_job_start_time()
+    self.update_job_end_time()
 
   def update_last_entry_timestamp(self):
     """Helper function to store the timestamp of the last entry in the cache."""
@@ -34,6 +39,28 @@ class GoodputCache:
         self._last_entry_timestamp = datetime.datetime.fromtimestamp(
             last_entry_posix_time[0]
         )
+
+  def update_job_start_time(self):
+    """Updates the job start time."""
+    # If the job start time is not set, try to find it in the cached entries.
+    if self._job_start_time is None and self._cached_entries:
+      for entry in self._cached_entries:
+        if _JOB_START_TIME in entry:
+          self._job_start_time = datetime.datetime.fromtimestamp(
+              entry[_JOB_START_TIME]
+          )
+          break
+
+  def update_job_end_time(self):
+    """Updates the job end time."""
+    # Overwrite the latest job end time if cached entries contain the job end
+    # time.
+    if self._cached_entries:
+      for entry in self._cached_entries:
+        if _JOB_END_TIME in entry:
+          self._job_end_time = datetime.datetime.fromtimestamp(
+              entry[_JOB_END_TIME]
+          )
 
   def update_goodput_info(self, goodput_info: GoodputInfo):
     """Updates the last computed Goodput information."""

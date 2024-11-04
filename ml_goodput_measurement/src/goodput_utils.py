@@ -24,7 +24,7 @@ class GoodputInfo:
       self,
       total_productive_time: float = 0.0,
       total_elapsed_time_since_start: float = 0.0,
-      total_unproductive_time: Optional[dict[BadputType, float]] = None,
+      total_unproductive_time: Optional[dict[BadputType, float]] = {},
       last_recorded_step: int = 0,
   ):
     self.total_productive_time = total_productive_time

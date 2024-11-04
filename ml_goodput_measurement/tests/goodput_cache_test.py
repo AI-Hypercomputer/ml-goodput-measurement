@@ -94,6 +94,38 @@ class GoodputCacheTest(googletest.TestCase):
         datetime.datetime.fromtimestamp(3),
     )
 
+  def test_update_job_start_time(self):
+    self.assertIsNone(self.goodput_cache._job_start_time)
+    self.goodput_cache.update_cached_entries([
+        {'step_start_time': 2, 'step': 1},
+        {'step_start_time': 3, 'step': 2},
+        {'job_end_time': 4},
+    ])
+    self.assertIsNone(self.goodput_cache._job_start_time)
+    self.goodput_cache.update_cached_entries([
+        {'job_start_time': 1},
+        {'job_start_time': 9},
+        {'step_start_time': 2, 'step': 1},
+        {'step_start_time': 3, 'step': 2},
+        {'job_end_time': 4},
+    ])
+    self.assertEqual(
+        self.goodput_cache._job_start_time,
+        datetime.datetime.fromtimestamp(1),
+    )
+
+  def test_update_job_end_time(self):
+    self.assertIsNone(self.goodput_cache._job_end_time)
+    self.goodput_cache.update_cached_entries([
+        {'job_end_time': 1},
+        {'job_end_time': 2},
+        {'job_end_time': 3},
+    ])
+    self.assertEqual(
+        self.goodput_cache._job_end_time,
+        datetime.datetime.fromtimestamp(3),
+    )
+
 
 if __name__ == '__main__':
   googletest.main()

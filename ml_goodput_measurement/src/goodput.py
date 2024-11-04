@@ -379,7 +379,7 @@ class GoodputCalculator:
       self._cloud_logger = logger
     else:
       self._cloud_logger = _CloudLogger(job_name, logger_name)
-    self._log_entries = []
+    self._current_entries = []
     self._goodput_cache = GoodputCache()
 
   def _get_total_productive_and_unproductive_time(
@@ -391,6 +391,51 @@ class GoodputCalculator:
       A tuple of the total productive training time, the total unproductive time
       (dict of BadputType and unproductive time) and the last step recorded till
       now.
+    """
+    cached_productive_time, cached_unproductive_time, _ = (
+        self._get_cached_productive_and_unproductive_time()
+    )
+    current_productive_time, current_unproductive_time, last_recorded_step = (
+        self._get_current_productive_and_unproductive_time()
+    )
+    total_productive_time = cached_productive_time + current_productive_time
+    total_unproductive_time = {}
+    for badput_type, unproductive_time in current_unproductive_time.items():
+      if badput_type in cached_unproductive_time:
+        total_unproductive_time[badput_type] = (
+            unproductive_time + cached_unproductive_time[badput_type]
+        )
+      else:
+        total_unproductive_time[badput_type] = unproductive_time
+
+    return (
+        total_productive_time,
+        total_unproductive_time,
+        last_recorded_step,
+    )
+
+  def _get_cached_productive_and_unproductive_time(
+      self,
+  ) -> tuple[float, dict[BadputType, float] | None, int]:
+    """Helper function to retrieve the cached productive training time and unproductive time."""
+    goodput_info = self._goodput_cache._goodput_info
+    if not self._goodput_cache.is_cache_empty() and goodput_info is not None:
+      return (
+          goodput_info.total_productive_time,
+          goodput_info.total_unproductive_time,
+          goodput_info.last_recorded_step,
+      )
+    return (0.0, {}, 0)
+
+  def _get_current_productive_and_unproductive_time(
+      self,
+  ) -> tuple[float, dict[BadputType, float], int]:
+    """Helper function to compute the current productive training time, unproductive time and the last step recorded till now.
+
+    Returns:
+      A tuple of the productive training time, the unproductive time
+      (dict of BadputType and unproductive time) and the last step recorded till
+      now based on the latest entries retrieved from Cloud Logging.
     """
 
     def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
@@ -520,7 +565,7 @@ class GoodputCalculator:
     step_start_data = {}
     job_start_time = None
     job_end_time = None
-    for payload in self._log_entries:
+    for payload in self._current_entries:
       if _JOB_START_TIME in payload:
         # Keep track of the latest start to compute badput due to disruption.
         job_start_time = payload[_JOB_START_TIME]
@@ -601,16 +646,42 @@ class GoodputCalculator:
     return productive_training_time, total_unproductive_time, last_step
 
   def _get_total_job_time(self) -> float:
-    """Helper function to compute the total job runtime.
+    """Helper function to compute the total job runtime."""
+    return self._get_cached_total_job_time() + self._get_current_job_time()
+
+  def _get_cached_total_job_time(self) -> float:
+    """Helper function to retrieve cached total job runtime if available."""
+    if not self._goodput_cache.is_cache_empty():
+      goodput_info = self._goodput_cache._goodput_info
+      if goodput_info:
+        return goodput_info.total_elapsed_time_since_start
+    return 0.0
+
+  def _get_current_job_time(self) -> float:
+    """Helper function to compute the current job runtime.
 
     Returns:
-      The job's total runtime.
+      The job's total runtime computed based on the last retrieved logs.
     """
+    # Find the last entry's timestamp as current window's start
+    # (present if entries are cached).
+    start_time = self._goodput_cache._last_entry_timestamp
+    if start_time:
+      end_time = self._goodput_cache._job_end_time
+      if end_time is not None:
+        return end_time.timestamp() - start_time.timestamp()
+      # If the job's end time is missing then job has not yet completed, use
+      # current time to compute total job time.
+      return (
+          datetime.datetime.now(datetime.timezone.utc).timestamp()
+          - start_time.timestamp()
+      )
+
     # De-serealize job start and end times from cloud logging entries. These
     # will be used to compute total runtime of the job.
     job_start_time = None
     job_end_time = None
-    for payload in self._log_entries:
+    for payload in self._current_entries:
       # Locate the earliest timestamp recorded for the job's start.
       if _JOB_START_TIME in payload and job_start_time is None:
         job_start_time = payload[_JOB_START_TIME]
@@ -632,14 +703,12 @@ class GoodputCalculator:
     """Helper function to update the log entries."""
     current_query_time = datetime.datetime.now(datetime.timezone.utc)
     if not self._goodput_cache.is_cache_empty():
-      self._log_entries = self._goodput_cache._cached_entries
       last_entry_timestamp = self._goodput_cache._last_entry_timestamp
-      new_entries = self._cloud_logger.read_cloud_logging_entries(
+      self._current_entries = self._cloud_logger.read_cloud_logging_entries(
           last_entry_timestamp, current_query_time
       )
-      self._log_entries.extend(new_entries)
     else:
-      self._log_entries = self._cloud_logger.read_cloud_logging_entries()
+      self._current_entries = self._cloud_logger.read_cloud_logging_entries()
 
   def get_job_goodput(
       self, include_badput_breakdown=False
@@ -704,7 +773,7 @@ class GoodputCalculator:
     )
 
     # Update the Goodput cache with new information.
-    self._goodput_cache.update_cached_entries(self._log_entries)
+    self._goodput_cache.update_cached_entries(self._current_entries)
     self._goodput_cache.update_goodput_info(
         GoodputInfo(
             total_productive_time=productive_training_time,
@@ -756,7 +825,7 @@ class GoodputCalculator:
     tpu_initialization_badput = 0.0
     training_prep_badput = 0.0
     data_loading_badput = 0.0
-    for payload in self._log_entries:
+    for payload in self._current_entries:
       # Compute badput due to TPU initialization.
       if _TPU_INIT_START_TIME in payload:
         tpu_init_start_time = payload[_TPU_INIT_START_TIME]

@@ -4,6 +4,7 @@ import datetime
 import time
 
 from cloud_goodput.ml_goodput_measurement.src import goodput
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
 
 from google3.testing.pybase import googletest
 
@@ -716,15 +717,13 @@ class BadputTest(googletest.TestCase):
     expected_badput_due_to_tpu_initialization = (
         (_TEST_TPU_INIT_TIME.total_seconds()) / total_time.total_seconds() * 100
     )
-    computed_badput_breakdown = (
-        self.goodput_calculator.get_job_badput_breakdown()
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
     )
     self.assertNotEmpty(computed_badput_breakdown)
-    self.assertIn(
-        goodput.BadputType.TPU_INITIALIZATION, computed_badput_breakdown
-    )
+    self.assertIn(BadputType.TPU_INITIALIZATION, computed_badput_breakdown)
     self.assertAlmostEqual(
-        computed_badput_breakdown[goodput.BadputType.TPU_INITIALIZATION],
+        computed_badput_breakdown[BadputType.TPU_INITIALIZATION],
         expected_badput_due_to_tpu_initialization,
         delta=0.1,
     )
@@ -766,8 +765,8 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_job_end_time(job_end_time)
 
     # Compute Badput with selection.
-    computed_badput_breakdown = (
-        self.goodput_calculator.get_job_badput_breakdown()
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
     )
     expected_badput_due_to_training_preparation = (
         (_TEST_TRAINING_PREPARATION_TIME.total_seconds())
@@ -776,9 +775,9 @@ class BadputTest(googletest.TestCase):
     )
 
     self.assertNotEmpty(computed_badput_breakdown)
-    self.assertIn(goodput.BadputType.TRAINING_PREP, computed_badput_breakdown)
+    self.assertIn(BadputType.TRAINING_PREP, computed_badput_breakdown)
     self.assertAlmostEqual(
-        computed_badput_breakdown[goodput.BadputType.TRAINING_PREP],
+        computed_badput_breakdown[BadputType.TRAINING_PREP],
         expected_badput_due_to_training_preparation,
         delta=0.1,
     )
@@ -834,8 +833,8 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_job_end_time(job_end_time)
 
     # Compute Badput with selection.
-    computed_badput_breakdown = (
-        self.goodput_calculator.get_job_badput_breakdown()
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
     )
     expected_badput_due_to_data_loading = (
         (_TEST_DATA_LOADING_TIME.total_seconds())
@@ -844,9 +843,9 @@ class BadputTest(googletest.TestCase):
     )
 
     self.assertNotEmpty(computed_badput_breakdown)
-    self.assertIn(goodput.BadputType.DATA_LOADING, computed_badput_breakdown)
+    self.assertIn(BadputType.DATA_LOADING, computed_badput_breakdown)
     self.assertAlmostEqual(
-        computed_badput_breakdown[goodput.BadputType.DATA_LOADING],
+        computed_badput_breakdown[BadputType.DATA_LOADING],
         expected_badput_due_to_data_loading,
         delta=0.1,
     )
@@ -907,8 +906,8 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_job_end_time(job_end_time)
 
     # Compute Badput.
-    computed_badput_breakdown = (
-        self.goodput_calculator.get_job_badput_breakdown()
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
     )
     expected_badput_due_to_program_startup = (
         (_TEST_FIRST_STEP_EXTRA_TIME.total_seconds())
@@ -917,9 +916,9 @@ class BadputTest(googletest.TestCase):
     )
 
     self.assertNotEmpty(computed_badput_breakdown)
-    self.assertIn(goodput.BadputType.PROGRAM_STARTUP, computed_badput_breakdown)
+    self.assertIn(BadputType.PROGRAM_STARTUP, computed_badput_breakdown)
     self.assertAlmostEqual(
-        computed_badput_breakdown[goodput.BadputType.PROGRAM_STARTUP],
+        computed_badput_breakdown[BadputType.PROGRAM_STARTUP],
         expected_badput_due_to_program_startup,
         delta=0.1,
     )
@@ -1006,8 +1005,8 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_job_end_time(job_end_time)
 
     # Compute Badput.
-    computed_badput_breakdown = (
-        self.goodput_calculator.get_job_badput_breakdown()
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
     )
     expected_badput_due_to_program_startup = (
         ((_TEST_FIRST_STEP_EXTRA_TIME * 2).total_seconds())
@@ -1016,9 +1015,9 @@ class BadputTest(googletest.TestCase):
     )
 
     self.assertNotEmpty(computed_badput_breakdown)
-    self.assertIn(goodput.BadputType.PROGRAM_STARTUP, computed_badput_breakdown)
+    self.assertIn(BadputType.PROGRAM_STARTUP, computed_badput_breakdown)
     self.assertAlmostEqual(
-        computed_badput_breakdown[goodput.BadputType.PROGRAM_STARTUP],
+        computed_badput_breakdown[BadputType.PROGRAM_STARTUP],
         expected_badput_due_to_program_startup,
         delta=0.1,
     )
@@ -1105,8 +1104,8 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_job_end_time(job_end_time)
 
     # Compute Badput.
-    computed_badput_breakdown = (
-        self.goodput_calculator.get_job_badput_breakdown()
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
     )
     wasted_progress_and_disruption_time = (
         disruption_time
@@ -1120,13 +1119,11 @@ class BadputTest(googletest.TestCase):
 
     self.assertNotEmpty(computed_badput_breakdown)
     self.assertIn(
-        goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
+        BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
         computed_badput_breakdown,
     )
     self.assertAlmostEqual(
-        computed_badput_breakdown[
-            goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION
-        ],
+        computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
         expected_badput_due_to_disruptions,
         delta=0.1,
     )

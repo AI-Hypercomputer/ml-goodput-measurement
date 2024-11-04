@@ -1,14 +1,15 @@
 """Goodput package API implementations.
 
-This file contains all the methods exposed through the ml-goodput-measurement
-library for users to log necessary information, query and monitor the computed
-Goodput and Badput metrics.
+This file contains all the methods exposed through the cloud_goodput library
+for users to log necessary information to compute Goodput, and to query the
+computed Goodput.
 """
 
 import datetime
-import enum
 import logging
 from typing import Any, Optional
+from cloud_goodput.ml_goodput_measurement.src.goodput_cache import GoodputCache
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
 import numpy as np
 from scipy import stats
 
@@ -63,21 +64,28 @@ class _CloudLogger:
           severity='INFO',
       )
 
-  def _get_filter_msg(self) -> str:
+  def _get_filter_msg(
+      self,
+      start_time: datetime.datetime | None,
+      end_time: datetime.datetime | None,
+  ) -> str:
     """Gets the filter message for the Cloud Logging query."""
     filter_entries = [
         'severity=INFO',
         f'jsonPayload.job_name="{self.job_name}"',
     ]
     # Add a filter to bind an end-time to the query window.
-    end_time = datetime.datetime.now(datetime.timezone.utc)
-    filter_entries.append(f'timestamp<="{end_time.isoformat()}"')
+    if end_time is None:
+      end_time = datetime.datetime.now(datetime.timezone.utc)
+
+    filter_entries.append(f'timestamp<"{end_time.isoformat()}"')
 
     # Add a filter to bind a start-time to the query window (if available).
-    if self.job_start_time is not None:
-      start_time = self.job_start_time - datetime.timedelta(days=1)
-      if start_time.tzinfo is None:
-        start_time = self.job_start_time.replace(tzinfo=datetime.timezone.utc)
+    if start_time is None:
+      if self.job_start_time is not None:
+        start_time = self.job_start_time - datetime.timedelta(days=1)
+
+    if start_time is not None:
       filter_entries.append(f'timestamp>="{start_time.isoformat()}"')
     return ' AND '.join(filter_entries)
 
@@ -91,7 +99,11 @@ class _CloudLogger:
         )
         break
 
-  def read_cloud_logging_entries(self):
+  def read_cloud_logging_entries(
+      self,
+      start_time: Optional[datetime.datetime] = None,
+      end_time: Optional[datetime.datetime] = None,
+  ):
     """Queries Cloud Logging entries for the specific job.
 
     Returns:
@@ -101,7 +113,7 @@ class _CloudLogger:
     import google.cloud.logging   # pylint: disable=g-import-not-at-top
 
     entries = self.logger.list_entries(
-        filter_=self._get_filter_msg(),
+        filter_=self._get_filter_msg(start_time, end_time),
         order_by=google.cloud.logging.ASCENDING,
         page_size=_CLOUD_LOGGING_PAGE_SIZE,
     )
@@ -338,18 +350,6 @@ class GoodputRecorder:
     })
 
 
-class BadputType(enum.Enum):
-  """The type of Badput."""
-
-  TPU_INITIALIZATION = 1
-  TRAINING_PREP = 2
-  PROGRAM_STARTUP = 3
-  DATA_LOADING = 4
-  UNPRODUCTIVE_CHECKPOINTING = 5
-  WASTED_PROGRESS_FROM_DISRUPTION = 6
-  OTHER = 7
-
-
 class GoodputCalculator:
   """The Goodput calculator class, responsible for querying necessary information and computing Goodput metrics to return to the user application.
 
@@ -371,6 +371,7 @@ class GoodputCalculator:
       job_name: Name of the job the GoodputCalculator is for.
       logger_name: Name of the log being written.
       logger: Should never be passed directly by the user.
+      using_pathways: Whether or not the job uses Pathways.
     """
     self.job_name = job_name
     self.using_pathways = using_pathways
@@ -378,15 +379,13 @@ class GoodputCalculator:
       self._cloud_logger = logger
     else:
       self._cloud_logger = _CloudLogger(job_name, logger_name)
+    self._log_entries = []
+    self._goodput_cache = GoodputCache()
 
   def _get_total_productive_and_unproductive_time(
-      self, entries: list[Any]
+      self,
   ) -> tuple[float, dict[BadputType, float], int]:
     """Helper function to compute the total productive training time, unproductive time and the last step recorded till now.
-
-    Args:
-      entries: Cloud Logging entries from user-specified logger for a specific
-        job.
 
     Returns:
       A tuple of the total productive training time, the total unproductive time
@@ -521,7 +520,7 @@ class GoodputCalculator:
     step_start_data = {}
     job_start_time = None
     job_end_time = None
-    for payload in entries:
+    for payload in self._log_entries:
       if _JOB_START_TIME in payload:
         # Keep track of the latest start to compute badput due to disruption.
         job_start_time = payload[_JOB_START_TIME]
@@ -601,12 +600,8 @@ class GoodputCalculator:
     # step recorded.
     return productive_training_time, total_unproductive_time, last_step
 
-  def _get_total_job_time(self, entries: list[Any]) -> float:
+  def _get_total_job_time(self) -> float:
     """Helper function to compute the total job runtime.
-
-    Args:
-      entries: Cloud Logging entries from user-specified logger for a specific
-        job.
 
     Returns:
       The job's total runtime.
@@ -615,7 +610,7 @@ class GoodputCalculator:
     # will be used to compute total runtime of the job.
     job_start_time = None
     job_end_time = None
-    for payload in entries:
+    for payload in self._log_entries:
       # Locate the earliest timestamp recorded for the job's start.
       if _JOB_START_TIME in payload and job_start_time is None:
         job_start_time = payload[_JOB_START_TIME]
@@ -632,6 +627,19 @@ class GoodputCalculator:
     # The the job's start time is missing so the total job time cannot be
     # calculated. Caller of this function should raise an error if this happens.
     return 0.0
+
+  def _update_log_entries(self):
+    """Helper function to update the log entries."""
+    current_query_time = datetime.datetime.now(datetime.timezone.utc)
+    if not self._goodput_cache.is_cache_empty():
+      self._log_entries = self._goodput_cache._cached_entries
+      last_entry_timestamp = self._goodput_cache._last_entry_timestamp
+      new_entries = self._cloud_logger.read_cloud_logging_entries(
+          last_entry_timestamp, current_query_time
+      )
+      self._log_entries.extend(new_entries)
+    else:
+      self._log_entries = self._cloud_logger.read_cloud_logging_entries()
 
   def get_job_goodput(
       self, include_badput_breakdown=False
@@ -665,8 +673,11 @@ class GoodputCalculator:
     # TODO(b/339234919): Combine certain operations in `_get_total_job_time`,
     # `_get_total_productive_and_unproductive_time` and
     # `get_job_badput_breakdown` so fewer passes of the data are performed.
-    entries = self._cloud_logger.read_cloud_logging_entries()
-    total_job_time = self._get_total_job_time(entries)
+
+    # Update the logs used to compute Goodput.
+    self._update_log_entries()
+
+    total_job_time = self._get_total_job_time()
     # No calculations can be made if total job time is zero. This can happen if
     # logs for the job are not present, sent to an invalid location or contain
     # bad data. Raise a ValueError if this happens.
@@ -676,7 +687,7 @@ class GoodputCalculator:
           ' logging entries.'
       )
     productive_training_time, _, last_step = (
-        self._get_total_productive_and_unproductive_time(entries)
+        self._get_total_productive_and_unproductive_time()
     )
     if (
         productive_training_time < 0.0
@@ -690,6 +701,17 @@ class GoodputCalculator:
     job_goodput = (float(productive_training_time) / total_job_time) * 100
     job_badput_breakdown = (
         self.get_job_badput_breakdown() if include_badput_breakdown else {}
+    )
+
+    # Update the Goodput cache with new information.
+    self._goodput_cache.update_cached_entries(self._log_entries)
+    self._goodput_cache.update_goodput_info(
+        GoodputInfo(
+            total_productive_time=productive_training_time,
+            total_elapsed_time_since_start=total_job_time,
+            total_unproductive_time=job_badput_breakdown,
+            last_recorded_step=last_step,
+        )
     )
     return job_goodput, job_badput_breakdown, last_step
 
@@ -721,8 +743,7 @@ class GoodputCalculator:
       total job time.
     """
     badput_breakdown = {}
-    entries = self._cloud_logger.read_cloud_logging_entries()
-    total_job_time = self._get_total_job_time(entries)
+    total_job_time = self._get_total_job_time()
     if total_job_time == 0.0:
       raise ValueError(
           'Total job time is zero, Badput cannot be calculated. Please fix the'
@@ -735,7 +756,7 @@ class GoodputCalculator:
     tpu_initialization_badput = 0.0
     training_prep_badput = 0.0
     data_loading_badput = 0.0
-    for payload in entries:
+    for payload in self._log_entries:
       # Compute badput due to TPU initialization.
       if _TPU_INIT_START_TIME in payload:
         tpu_init_start_time = payload[_TPU_INIT_START_TIME]
@@ -803,9 +824,7 @@ class GoodputCalculator:
     ) * 100
 
     # Collect unproductive time from step times.
-    _, unproductive_time, _ = self._get_total_productive_and_unproductive_time(
-        entries
-    )
+    _, unproductive_time, _ = self._get_total_productive_and_unproductive_time()
     if BadputType.PROGRAM_STARTUP in unproductive_time:
       badput_breakdown[BadputType.PROGRAM_STARTUP] = (
           unproductive_time[BadputType.PROGRAM_STARTUP] / total_job_time

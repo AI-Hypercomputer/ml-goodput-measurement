@@ -14,4 +14,6 @@
 
 from cloud_goodput.ml_goodput_measurement.src import checkpoint_badput_calculator
 from cloud_goodput.ml_goodput_measurement.src import goodput
+from cloud_goodput.ml_goodput_measurement.src import goodput_cache
+from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 from cloud_goodput.ml_goodput_measurement.src import monitoring

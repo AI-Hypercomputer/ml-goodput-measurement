@@ -17,13 +17,13 @@
 
 ## Overview
 
- ML Goodput Measurement is a library intended to be used with Cloud TPU to log the
- necessary information and query a job's Goodput and Badput Breakdown. It can be pip
- installed to import its modules, and retrieve information about a training job's
- overall productive Goodput and sources of Badput. The package exposes API
- interfaces to log useful information from the user application and query Goodput
- for the job run, gain insight into the productivity of ML workloads and utilization
- of compute resources.
+ ML Goodput Measurement is a library intended to be used with Cloud accelerators
+ to log necessary information and query a job's Goodput and Badput Breakdown. It
+ can be pip installed to import its modules, and retrieve information about a
+ training job's overall productive Goodput and sources of Badput. The package
+ exposes API interfaces to log useful information from the user application and
+ query Goodput for the job run, gain insight into the productivity of ML
+ workloads and utilization of compute resources.
 
  The package also exposes Goodput Monitoring APIs which allow asynchronous query
  and export of the job's Goodput to Tensorboard with configurable upload interval.
@@ -57,7 +57,7 @@
 
 ## Installation
 
- To install the ML Goodput Measurement package, run the following command on TPU VM:
+ To install the ML Goodput Measurement package, run the following command on the VM:
 
  ```bash
  pip install ml-goodput-measurement
@@ -77,7 +77,7 @@ project, then do the following:
 
 3. [Enable](https://console.cloud.google.com/flows/enableapi?apiid=logging.googleapis.com&_ga=2.27841276.1571868865.1726250448-123998259.1726107009) the Cloud Logging API.
 
-To run your training on Cloud TPU, set up the Cloud TPU environment by following
+To run your training on Cloud accelerator, set up the environment by following
 instructions [here](https://cloud.google.com/tpu/docs/setup-gcp-account).
 
 To learn more about Google Cloud Logging, visit this [page](https://cloud.google.com/logging/docs).
@@ -140,7 +140,7 @@ To learn more about Google Cloud Logging, visit this [page](https://cloud.google
  def main(argv: Sequence[str]) -> None:
  # Initialize configs…
  goodput_recorder.record_job_start_time(datetime.datetime.now())
- # TPU Initialization and device scanning…
+ # Device Initialization and device scanning…
  # Set up other things for the main training loop…
  # Main training loop
  train_loop(config)
@@ -169,9 +169,9 @@ For example:
  return state
  ```
 
-#### Record TPU Initialization, Training Preparation and Data Loading Time
+#### Record Device Initialization, Training Preparation and Data Loading Time
 
-  - Use the recorder object to record TPU Initialization time using `record_tpu_init_start_time` and `record_tpu_init_end_time`.
+  - Use the recorder object to record Device Initialization time using `record_tpu_init_start_time` and `record_tpu_init_end_time`.
   - Use the recorder object to record Training Preparation time using `record_training_preparation_start_time` and `record_training_preparation_end_time`.
   - Use the recorder object to record Data Loading time using `record_data_loading_start_time` and `record_data_loading_end_time`.
 
@@ -236,7 +236,7 @@ print(f"Total job goodput: {total_goodput:.2f}%")
 #### Retrieve Badput Breakdown
 
 Badput breakdown is dictionary representation of various sources of Badput mapped to its corresponding value. 
-Badput is the percentage of time spent by the job doing work that is not training to the total lifetime of the job. This includes time spent doing TPU initialization, training preparation, checkpoint loading, compilation or re-compilation, data loading, checkpoint saving and time lost due to disruptions.
+Badput is the percentage of time spent by the job doing work that is not training to the total lifetime of the job. This includes time spent doing Device initialization, training preparation, checkpoint loading, compilation or re-compilation, data loading, checkpoint saving and time lost due to disruptions.
 
 Following Badput Breakdown buckets are supported by the library at this time:
 

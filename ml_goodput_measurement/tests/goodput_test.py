@@ -1128,6 +1128,54 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_badput_calculator_unknown_badput(self):
+    """Test function to validate unknown badput bucket."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+
+    # Mock _TEST_TOTAL_STEPS steps of training with built-in badput
+    # due to program startup.
+    step_start_time = (
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_PROGRAM_STARTUP_TIME
+    )
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time.
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    unknown_badput_time = datetime.timedelta(seconds=5)
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + unknown_badput_time
+    )
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(BadputType.OTHER, computed_badput_breakdown)
+
+    expected_badput_due_to_unknown = (
+        (unknown_badput_time.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.OTHER],
+        expected_badput_due_to_unknown,
+        delta=0.1,
+    )
 
 if __name__ == '__main__':
   googletest.main()

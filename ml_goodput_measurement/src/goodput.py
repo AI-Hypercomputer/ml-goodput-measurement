@@ -44,7 +44,8 @@ class _CloudLogger:
       job_name: Name of the job the _CloudLogger is for.
       log_name: Name of the log being written.
     """
-    import google.cloud.logging   # pylint: disable=g-import-not-at-top
+    import google.cloud.logging  # pylint: disable=g-import-not-at-top
+
     self.job_name = job_name
     logging_client = google.cloud.logging.Client()
     self.logger = logging_client.logger(log_name)
@@ -77,6 +78,8 @@ class _CloudLogger:
     # Add a filter to bind an end-time to the query window.
     if end_time is None:
       end_time = datetime.datetime.now(datetime.timezone.utc)
+    elif end_time.tzinfo is None:
+      end_time = end_time.replace(tzinfo=datetime.timezone.utc)
 
     filter_entries.append(f'timestamp<"{end_time.isoformat()}"')
 
@@ -86,6 +89,8 @@ class _CloudLogger:
         start_time = self.job_start_time - datetime.timedelta(days=1)
 
     if start_time is not None:
+      if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=datetime.timezone.utc)
       filter_entries.append(f'timestamp>="{start_time.isoformat()}"')
     return ' AND '.join(filter_entries)
 
@@ -108,9 +113,8 @@ class _CloudLogger:
 
     Returns:
       Filtered entries in ascending order of timestamp.
-
     """
-    import google.cloud.logging   # pylint: disable=g-import-not-at-top
+    import google.cloud.logging  # pylint: disable=g-import-not-at-top
 
     entries = self.logger.list_entries(
         filter_=self._get_filter_msg(start_time, end_time),
@@ -492,10 +496,7 @@ class GoodputCalculator:
       min_step = min(list(step_start_data.keys()))
       step_times = []
       for step, start_time in step_start_data.items():
-        if (
-            step <= curr_step
-            and step - 1 in step_start_data
-        ):
+        if step <= curr_step and step - 1 in step_start_data:
           segment_productive_total_time += (
               start_time - step_start_data[step - 1]
           )
@@ -739,9 +740,6 @@ class GoodputCalculator:
       cannot be computed.
       ValueError if productive training time is invalid.
     """
-    # TODO(b/339234919): Combine certain operations in `_get_total_job_time`,
-    # `_get_total_productive_and_unproductive_time` and
-    # `get_job_badput_breakdown` so fewer passes of the data are performed.
 
     # Update the logs used to compute Goodput.
     self._update_log_entries()
@@ -829,9 +827,7 @@ class GoodputCalculator:
       # Compute badput due to TPU initialization.
       if _TPU_INIT_START_TIME in payload:
         tpu_init_start_time = payload[_TPU_INIT_START_TIME]
-      elif (
-          _TPU_INIT_END_TIME in payload and tpu_init_start_time is not None
-      ):
+      elif _TPU_INIT_END_TIME in payload and tpu_init_start_time is not None:
         tpu_initialization_badput += (
             payload[_TPU_INIT_END_TIME] - tpu_init_start_time
         )
@@ -893,7 +889,9 @@ class GoodputCalculator:
     ) * 100
 
     # Collect unproductive time from step times.
-    _, unproductive_time, _ = self._get_total_productive_and_unproductive_time()
+    productive_training_time, unproductive_time, _ = (
+        self._get_total_productive_and_unproductive_time()
+    )
     if BadputType.PROGRAM_STARTUP in unproductive_time:
       badput_breakdown[BadputType.PROGRAM_STARTUP] = (
           unproductive_time[BadputType.PROGRAM_STARTUP] / total_job_time
@@ -908,5 +906,12 @@ class GoodputCalculator:
       ) * 100
     else:
       badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION] = 0.0
+
+    # Populate the 'Other/Unknown' badput bucket.
+    total_known_badput = sum(badput_breakdown.values())
+    total_goodput = (float(productive_training_time) / total_job_time) * 100
+    badput_breakdown[BadputType.OTHER] = (
+        100.0 - total_goodput - total_known_badput
+    )
 
     return badput_breakdown

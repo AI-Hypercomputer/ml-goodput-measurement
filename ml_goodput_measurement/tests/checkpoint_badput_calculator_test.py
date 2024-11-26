@@ -302,7 +302,15 @@ class CheckpointBadputCalculatorTest(absltest.TestCase):
             checkpoint_badput_calculator.OPERATION_TYPE_LOCAL
         )
     )
-    self.assertEqual(cm_breakdown, expected_breakdown)
+    for field in dataclasses.fields(cm_breakdown):
+      value1 = getattr(cm_breakdown, field.name)
+      value2 = getattr(expected_breakdown, field.name)
+      if value1 != value2:
+        raise ValueError(
+            f"Mismatch in field '{field.name}':\n"
+            f"  Actual: {value1}\n"
+            f"  Expected: {value2}"
+        )
 
   def test_checkpoint_badput_calculator_persistent_restore_operation(self):
     """Test for persistent restore operation."""
@@ -420,5 +428,19 @@ class CheckpointBadputCalculatorTest(absltest.TestCase):
     expected_breakdown.maximum_broadcast_time = default_broadcast_duration_secs
     expected_breakdown.standard_deviation_broadcast_time = 0
 
+    cm_breakdown = (
+        self.checkpoint_badput_calculator.calculate_restore_operation_checkpoint_manager_blocking_time(
+            checkpoint_badput_calculator.OPERATION_TYPE_LOCAL
+        )
+    )
+    for field in dataclasses.fields(cm_breakdown):
+      value1 = getattr(cm_breakdown, field.name)
+      value2 = getattr(expected_breakdown, field.name)
+      if value1 != value2:
+        raise ValueError(
+            f"Mismatch in field '{field.name}':\n"
+            f"  Actual: {value1}\n"
+            f"  Expected: {value2}"
+        )
 if __name__ == '__main__':
   absltest.main()

@@ -171,7 +171,33 @@ class CheckpointBadputCalculator:
     else:
       return True
 
-  def is_valid_step_stats(
+  def is_valid_save_stats(
+      self,
+      step_stats: Dict[str, str],
+      operation_type: Optional[str] = OPERATION_TYPE_PERSISTENT_AND_LOCAL,
+  ):
+    """Checks if the step stats is valid.
+
+    Args:
+      step_stats: The step stats to check.
+      operation_type: whether to check for local or persistent or both.
+
+    Returns:
+      Boolean indicating whether the step stats is valid.
+    """
+    if (
+        _EVENT_TYPE not in step_stats
+        or step_stats[_EVENT_TYPE] != OPERATION_TYPE_SAVE
+    ):
+      return False
+    elif operation_type == OPERATION_TYPE_LOCAL:
+      return self._is_local_operation(step_stats)
+    elif operation_type == OPERATION_TYPE_PERSISTENT:
+      return not self._is_local_operation(step_stats)
+    else:
+      return True
+
+  def is_valid_restore_stats(
       self,
       step_stats: Dict[str, str],
       operation_type: Optional[str] = OPERATION_TYPE_PERSISTENT_AND_LOCAL,
@@ -188,10 +214,15 @@ class CheckpointBadputCalculator:
     """
     if _EVENT_TYPE not in step_stats:
       return False
+    elif step_stats[_EVENT_TYPE] not in [
+        OPERATION_TYPE_RESTORE,
+        OPERATION_TYPE_EMERGENCY_RESTORE,
+    ]:
+      return False
     elif operation_type == OPERATION_TYPE_LOCAL:
-      return self._is_local_operation(step_stats)
+      return step_stats[_EVENT_TYPE] == OPERATION_TYPE_EMERGENCY_RESTORE
     elif operation_type == OPERATION_TYPE_PERSISTENT:
-      return not self._is_local_operation(step_stats)
+      return step_stats[_EVENT_TYPE] == OPERATION_TYPE_RESTORE
     else:
       return True
 
@@ -360,8 +391,7 @@ class CheckpointBadputCalculator:
     step_already_processed: dict[str, SaveProcessedStep] = dict()
     for step_stats in self.entries:
       if (
-          not self.is_valid_step_stats(step_stats, operation_type)
-          or step_stats[_EVENT_TYPE] != OPERATION_TYPE_SAVE
+          not self.is_valid_save_stats(step_stats, operation_type)
       ):
         continue
 
@@ -548,9 +578,7 @@ class CheckpointBadputCalculator:
 
     step_already_processed: dict[str, RestoreProcessedStep] = dict()
     for step_stats in self.entries:
-      if not self.is_valid_step_stats(step_stats, operation_type) or step_stats[
-          _EVENT_TYPE
-      ] != (OPERATION_TYPE_RESTORE or OPERATION_TYPE_EMERGENCY_RESTORE):
+      if not self.is_valid_restore_stats(step_stats, operation_type):
         continue
 
       # Create a step info to identify the step_stats whether local or

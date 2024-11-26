@@ -132,6 +132,7 @@ class CheckpointBadputCalculatorTest(absltest.TestCase):
         job_name=_JOB_NAME,
         logger_name=_LOGGER_NAME,
         client=mock_gcloud_client,
+        use_goodput_logger=True,
     )
     self.checkpoint_badput_calculator = (
         checkpoint_badput_calculator.CheckpointBadputCalculator(options)
@@ -214,7 +215,15 @@ class CheckpointBadputCalculatorTest(absltest.TestCase):
             checkpoint_badput_calculator.OPERATION_TYPE_PERSISTENT
         )
     )
-    self.assertEqual(cm_breakdown, expected_breakdown)
+    for field in dataclasses.fields(cm_breakdown):
+      value1 = getattr(cm_breakdown, field.name)
+      value2 = getattr(expected_breakdown, field.name)
+      if value1 != value2:
+        raise ValueError(
+            f"Mismatch in field '{field.name}':\n"
+            f"  Actual: {value1}\n"
+            f"  Expected: {value2}"
+        )
 
   def test_checkpoint_badput_calculator_local_save_operation(self):
     """Test for local save operation."""
@@ -348,7 +357,15 @@ class CheckpointBadputCalculatorTest(absltest.TestCase):
             checkpoint_badput_calculator.OPERATION_TYPE_PERSISTENT
         )
     )
-    self.assertEqual(cm_breakdown, expected_breakdown)
+    for field in dataclasses.fields(cm_breakdown):
+      value1 = getattr(cm_breakdown, field.name)
+      value2 = getattr(expected_breakdown, field.name)
+      if value1 != value2:
+        raise ValueError(
+            f"Mismatch in field '{field.name}':\n"
+            f"  Actual: {value1}\n"
+            f"  Expected: {value2}"
+        )
 
   def test_checkpoint_badput_calculator_local_restore_operation(self):
     """Test for local restore operation."""

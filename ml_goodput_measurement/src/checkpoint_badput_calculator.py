@@ -116,6 +116,7 @@ class CheckpointLoggerOptions:
   job_name: str = _JOB_NAME
   logger_name: str = _LOGGER_NAME
   client: Optional[google_cloud_logging.Client] = None
+  use_goodput_logger: bool = False
 
 
 class CheckpointBadputCalculator:
@@ -125,12 +126,13 @@ class CheckpointBadputCalculator:
       self, options: CheckpointLoggerOptions = CheckpointLoggerOptions()
   ):
     self._options = options
-
-    if options.client is None:
-      self.logging_client = google_cloud_logging.Client()
-    else:
-      self.logging_client = options.client
-    self._logger = self.logging_client.logger(options.logger_name)
+    if not options.use_goodput_logger:
+      if options.client is None:
+        self.logging_client = google_cloud_logging.Client()
+      else:
+        self.logging_client = options.client
+      self._logger = self.logging_client.logger(options.logger_name)
+    self._use_goodput_logger = options.use_goodput_logger
     self.entries = []
 
   def read_entries(self) -> List[Dict[str, str]]:
@@ -139,6 +141,8 @@ class CheckpointBadputCalculator:
     Returns:
       Filtered entries in ascending order of timestamp.
     """
+    if self._use_goodput_logger:
+      return self.entries
 
     filter_entries = [
         'severity=INFO',
@@ -351,8 +355,7 @@ class CheckpointBadputCalculator:
       self, operation_type: Optional[str] = OPERATION_TYPE_PERSISTENT_AND_LOCAL,
   ) -> SaveCheckpointManagerVerticalStepStats:
     """Gets checkpoint manager blocking time breakdown for save operation."""
-    if not self.entries:
-      self.entries = self.read_entries()
+    self.entries = self.read_entries()
 
     step_already_processed: dict[str, SaveProcessedStep] = dict()
     for step_stats in self.entries:
@@ -541,8 +544,7 @@ class CheckpointBadputCalculator:
       operation_type: Optional[str] = OPERATION_TYPE_PERSISTENT_AND_LOCAL,
   ) -> RestoreCheckpointManagerVerticalStepStats:
     """Gets checkpoint manager blocking time breakdown for restore operation."""
-    if not self.entries:
-      self.entries = self.read_entries()
+    self.entries = self.read_entries()
 
     step_already_processed: dict[str, RestoreProcessedStep] = dict()
     for step_stats in self.entries:

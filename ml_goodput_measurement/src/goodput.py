@@ -8,10 +8,15 @@ computed Goodput.
 import datetime
 import logging
 from typing import Any, Optional
+
+from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointBadputCalculator
+from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointLoggerOptions
 from cloud_goodput.ml_goodput_measurement.src.goodput_cache import GoodputCache
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import GoodputInfo
 import numpy as np
 from scipy import stats
+
 
 _JOB_NAME = 'job_name'
 _STEP_COUNT = 'step_count'
@@ -769,6 +774,10 @@ class GoodputCalculator:
     job_badput_breakdown = (
         self.get_job_badput_breakdown() if include_badput_breakdown else {}
     )
+    if BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME in job_badput_breakdown:
+      job_goodput -= job_badput_breakdown[
+          BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME
+      ]
 
     # Update the Goodput cache with new information.
     self._goodput_cache.update_cached_entries(self._current_entries)
@@ -823,6 +832,26 @@ class GoodputCalculator:
     tpu_initialization_badput = 0.0
     training_prep_badput = 0.0
     data_loading_badput = 0.0
+
+    checkpoint_logger_options = CheckpointLoggerOptions(
+        use_goodput_logger=True
+    )
+    checkpoint_badput_calculator = CheckpointBadputCalculator(
+        checkpoint_logger_options
+    )
+    checkpoint_badput_calculator.entries = self._current_entries
+    checkpoint_manager_save_stats = (
+        checkpoint_badput_calculator.calculate_save_operation_checkpoint_manager_blocking_time()
+    )
+    checkpoint_manager_save_badput = (
+        checkpoint_manager_save_stats.total_checkpoint_manager_blocking_time
+    )
+    checkpoint_manager_restore_stats = (
+        checkpoint_badput_calculator.calculate_restore_operation_checkpoint_manager_blocking_time()
+    )
+    checkpoint_manager_restore_badput = (
+        checkpoint_manager_restore_stats.total_checkpoint_manager_time
+    )
     for payload in self._current_entries:
       # Compute badput due to TPU initialization.
       if _TPU_INIT_START_TIME in payload:
@@ -886,6 +915,14 @@ class GoodputCalculator:
       )
     badput_breakdown[BadputType.DATA_LOADING] = (
         data_loading_badput / total_job_time
+    ) * 100
+
+    badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME] = (
+        checkpoint_manager_save_badput / total_job_time
+    ) * 100
+
+    badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME] = (
+        checkpoint_manager_restore_badput / total_job_time
     ) * 100
 
     # Collect unproductive time from step times.

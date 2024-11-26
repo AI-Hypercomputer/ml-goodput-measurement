@@ -1,12 +1,16 @@
 """Goodput tests to validate Recorder, Calculator and Logger classes."""
 
+import dataclasses
+from dataclasses import asdict
 import datetime
 import time
+from typing import Optional
 
 from cloud_goodput.ml_goodput_measurement.src import goodput
 from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
 
 from google3.testing.pybase import googletest
+
 
 # Fake job timeline information for test purposes.
 _TEST_JOB_START_TIME = datetime.datetime(
@@ -25,6 +29,7 @@ _TEST_FIRST_STEP_EXTRA_TIME = datetime.timedelta(seconds=5)
 # Anomalous large step times
 _TEST_ANOMALOUS_STEP_TIME = datetime.timedelta(seconds=30)
 
+
 class MockCloudLogger:
 
   def __init__(self, job_name, logger_name):
@@ -37,6 +42,75 @@ class MockCloudLogger:
 
   def read_cloud_logging_entries(self):
     return self.entries
+
+
+@dataclasses.dataclass
+class MockSaveStepStatistics:
+  """Attributes for save step statistics.
+
+  Attributes:
+    step: The step number.
+    event_type: The event type.
+    checkpoint_manager_blocking_start_time: The start time of checkpoint manager
+      blocking section.
+    directory: The directory of the checkpoint.
+    reached_preemption: Whether the event reached preemption.
+    preemption_received_at: The time when preemption was received.
+    wait_for_prev_start_time: The start time of waiting for previous checkpoint.
+    checkpointer_blocking_start_time: The start time of blocking time introduced
+      by checkpointer.
+    get_old_steps_start_time: The start time of getting old steps.
+    synchronous: Whether the event is synchronous.
+    wait_for_prev_duration_secs: The duration of waiting for previous
+      checkpoint.
+    checkpointer_blocking_duration_secs: The duration of blocking time
+      introduced by checkpointer.
+    get_old_steps_duration_secs: The duration of getting old steps.
+    checkpoint_manager_blocking_duration_secs: The duration of checkpoint
+      manager blocking section.
+  """
+
+  step: Optional[int] = None
+  event_type: Optional[str] = 'save'
+  directory: Optional[str] = None
+  reached_preemption: Optional[bool] = False
+  preemption_received_at: Optional[float] = None
+  synchronous: Optional[bool] = False
+  wait_for_prev_start_time: Optional[float] = None
+  wait_for_prev_duration_secs: Optional[float] = None
+  checkpointer_blocking_start_time: Optional[float] = None
+  checkpointer_blocking_duration_secs: Optional[float] = None
+  get_old_steps_start_time: Optional[float] = None
+  get_old_steps_duration_secs: Optional[float] = None
+  checkpoint_manager_blocking_start_time: Optional[float] = None
+  checkpoint_manager_blocking_duration_secs: Optional[float] = None
+
+
+@dataclasses.dataclass
+class MockRestoreStepStatistics:
+  """Attributes for restore step statistics.
+
+  Attributes:
+    step: The step number.
+    event_type: The event type.
+    directory: The directory of the checkpoint.
+    checkpointer_start_time: The start time of restoring the checkpoint, while
+      using the checkpointer.
+    checkpointer_duration_secs: The total duration for restoring the checkpoint,
+      while using the checkpointer.
+    checkpoint_manager_start_time: The start time for restoring the checkpoint,
+      while using the checkpoint manager.
+    checkpoint_manager_duration_secs: The total duration for restoring the
+      checkpoint, while using the checkpoint manager.
+  """
+
+  step: Optional[int] = None
+  event_type: Optional[str] = 'restore'
+  directory: Optional[str] = None
+  checkpointer_start_time: Optional[float] = None
+  checkpointer_duration_secs: Optional[float] = None
+  checkpoint_manager_start_time: Optional[float] = None
+  checkpoint_manager_duration_secs: Optional[float] = None
 
 
 class GoodputTest(googletest.TestCase):
@@ -1176,6 +1250,178 @@ class BadputTest(googletest.TestCase):
         expected_badput_due_to_unknown,
         delta=0.1,
     )
+
+  def test_badput_calculator_checkpoint_badput(self):
+    """Validate computation of badput due to checkpoint manager time."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    # Mock training preparation.
+    self.goodput_recorder.record_training_preparation_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    self.goodput_recorder.record_training_preparation_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    # Mock data loading.
+    self.goodput_recorder.record_data_loading_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    self.goodput_recorder.record_data_loading_end_time(
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    # Mock training.
+    step_start_time = (
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+    # All steps but first progress with average step time.
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      # Add startup badput during the first step
+      if step == 0:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    # Mock a save operation.
+    save_stats = MockSaveStepStatistics(
+        step=1,
+        event_type='save',
+        directory='gs://bucket/path',
+        wait_for_prev_start_time=10.0,
+        wait_for_prev_duration_secs=1.0,
+        checkpointer_blocking_start_time=12.0,
+        checkpointer_blocking_duration_secs=2.0,
+        get_old_steps_start_time=13.0,
+        get_old_steps_duration_secs=3.0,
+        checkpoint_manager_blocking_start_time=10.0,
+        checkpoint_manager_blocking_duration_secs=6.0,
+        reached_preemption=True,
+        preemption_received_at=10.0,
+        synchronous=True,
+    )
+    self.mock_cloud_logger.write_cloud_logging_entry(asdict(save_stats))
+
+    # Simulate a 30-second disruption.
+    disruption_time = datetime.timedelta(seconds=30)
+    job_restart_time = step_start_time + disruption_time
+    self.goodput_recorder.record_job_start_time(job_restart_time)
+    step_start_time = (
+        job_restart_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    restart_from_step = 2
+    # All steps but first progress with average step time.
+    for step in range(restart_from_step, _TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      if step == restart_from_step:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + disruption_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+    restore_stats = MockRestoreStepStatistics(
+        step=1,
+        event_type='restore',
+        directory='gs://bucket/path',
+        checkpointer_start_time=10.0,
+        checkpointer_duration_secs=2.0,
+        checkpoint_manager_start_time=10.0,
+        checkpoint_manager_duration_secs=2.0,
+    )
+    self.mock_cloud_logger.write_cloud_logging_entry(asdict(restore_stats))
+
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Badput.
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    wasted_progress_and_disruption_time = (
+        disruption_time
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+    expected_badput_due_to_disruptions = (
+        (wasted_progress_and_disruption_time.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
+        computed_badput_breakdown,
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
+        expected_badput_due_to_disruptions,
+        delta=0.1,
+    )
+    self.assertIn(
+        BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME, computed_badput_breakdown
+    )
+
+    self.assertIn(
+        BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME,
+        computed_badput_breakdown,
+    )
+
+    expect_badput_due_to_checkpointing_save = (
+        (
+            save_stats.checkpoint_manager_blocking_duration_secs
+        )
+        / total_time.total_seconds()
+        * 100
+    )
+
+    expect_badput_due_to_checkpointing_restore = (
+        (
+            restore_stats.checkpoint_manager_duration_secs
+        )
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertEqual(
+        computed_badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME],
+        expect_badput_due_to_checkpointing_save,
+    )
+
+    self.assertEqual(
+        computed_badput_breakdown[
+            BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME
+        ],
+        expect_badput_due_to_checkpointing_restore,
+    )
+
 
 if __name__ == '__main__':
   googletest.main()

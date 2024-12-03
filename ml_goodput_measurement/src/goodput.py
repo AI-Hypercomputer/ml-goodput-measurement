@@ -401,14 +401,18 @@ class GoodputCalculator:
       (dict of BadputType and unproductive time) and the last step recorded till
       now.
     """
-    cached_productive_time, cached_unproductive_time, _ = (
-        self._get_cached_productive_and_unproductive_time()
-    )
+    (
+        cached_productive_time,
+        cached_unproductive_time,
+        cached_last_recorded_step,
+    ) = self._get_cached_productive_and_unproductive_time()
     current_productive_time, current_unproductive_time, last_recorded_step = (
         self._get_current_productive_and_unproductive_time()
     )
     total_productive_time = cached_productive_time + current_productive_time
-    total_unproductive_time = {}
+    total_unproductive_time = (
+        cached_unproductive_time if cached_unproductive_time is not None else {}
+    )
     for badput_type, unproductive_time in current_unproductive_time.items():
       if badput_type in cached_unproductive_time:
         total_unproductive_time[badput_type] = (
@@ -416,6 +420,7 @@ class GoodputCalculator:
         )
       else:
         total_unproductive_time[badput_type] = unproductive_time
+    last_recorded_step = max(cached_last_recorded_step, last_recorded_step)
 
     return (
         total_productive_time,
@@ -571,6 +576,12 @@ class GoodputCalculator:
     step_start_data = {}
     job_start_time = None
     job_end_time = None
+    tpu_init_start_time = None
+    training_prep_start_time = None
+    data_loading_start_time = None
+    tpu_initialization_badput = 0.0
+    training_prep_badput = 0.0
+    data_loading_badput = 0.0
     for payload in self._current_entries:
       if _JOB_START_TIME in payload:
         # Keep track of the latest start to compute badput due to disruption.
@@ -627,6 +638,71 @@ class GoodputCalculator:
         # Locate the last instance of job's end time if the job has completed.
         job_end_time = payload[_JOB_END_TIME]
 
+      # Compute badput due to TPU initialization.
+      if _TPU_INIT_START_TIME in payload:
+        tpu_init_start_time = payload[_TPU_INIT_START_TIME]
+      elif _TPU_INIT_END_TIME in payload and tpu_init_start_time is not None:
+        tpu_initialization_badput += (
+            payload[_TPU_INIT_END_TIME] - tpu_init_start_time
+        )
+        tpu_init_start_time = None
+
+      # Compute badput due to training preparation.
+      elif _TRAINING_PREPARATION_START_TIME in payload:
+        training_prep_start_time = payload[_TRAINING_PREPARATION_START_TIME]
+      elif (
+          _TRAINING_PREPARATION_END_TIME in payload
+          and training_prep_start_time is not None
+      ):
+        training_prep_badput += (
+            payload[_TRAINING_PREPARATION_END_TIME] - training_prep_start_time
+        )
+        training_prep_start_time = None
+
+      # Compute badput due to data loading.
+      elif _DATA_LOADING_START_TIME in payload:
+        data_loading_start_time = payload[_DATA_LOADING_START_TIME]
+      elif (
+          _DATA_LOADING_END_TIME in payload
+          and data_loading_start_time is not None
+      ):
+        data_loading_badput += (
+            payload[_DATA_LOADING_END_TIME] - data_loading_start_time
+        )
+        data_loading_start_time = None
+
+    # Compute unproductive time from checkpoint manager save and restore.
+    checkpoint_logger_options = CheckpointLoggerOptions(use_goodput_logger=True)
+    checkpoint_badput_calculator = CheckpointBadputCalculator(
+        checkpoint_logger_options
+    )
+    checkpoint_badput_calculator.entries = self._current_entries
+    checkpoint_manager_save_stats = (
+        checkpoint_badput_calculator.calculate_save_operation_checkpoint_manager_blocking_time()
+    )
+    checkpoint_manager_save_badput = (
+        checkpoint_manager_save_stats.total_checkpoint_manager_blocking_time
+    )
+    checkpoint_manager_restore_stats = (
+        checkpoint_badput_calculator.calculate_restore_operation_checkpoint_manager_blocking_time()
+    )
+    checkpoint_manager_restore_badput = (
+        checkpoint_manager_restore_stats.total_checkpoint_manager_time
+    )
+
+    # Populate some Badput buckets in total_unproductive_time.
+    total_unproductive_time[BadputType.TPU_INITIALIZATION] = (
+        tpu_initialization_badput
+    )
+    total_unproductive_time[BadputType.TRAINING_PREP] = training_prep_badput
+    total_unproductive_time[BadputType.DATA_LOADING] = data_loading_badput
+    total_unproductive_time[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME] = (
+        checkpoint_manager_save_badput
+    )
+    total_unproductive_time[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME] = (
+        checkpoint_manager_restore_badput
+    )
+
     if not step_start_data:
       return 0.0, {}, 0
 
@@ -645,6 +721,9 @@ class GoodputCalculator:
       productive_training_time += (
           datetime.datetime.utcnow().timestamp() - step_start_data[last_step]
       )
+
+    # Remove blocking checkpoint manager save time from productive time.
+    productive_training_time -= checkpoint_manager_save_badput
 
     # Return a tuple of the total productive training time, the total
     # unproductive time (dict of BadputType and unproductive time) and the last
@@ -758,7 +837,7 @@ class GoodputCalculator:
           'Total job time is zero, Goodput cannot be calculated. Please fix the'
           ' logging entries.'
       )
-    productive_training_time, _, last_step = (
+    productive_training_time, total_unproductive_time, last_step = (
         self._get_total_productive_and_unproductive_time()
     )
     if (
@@ -772,12 +851,12 @@ class GoodputCalculator:
     # last recorded step.
     job_goodput = (float(productive_training_time) / total_job_time) * 100
     job_badput_breakdown = (
-        self.get_job_badput_breakdown() if include_badput_breakdown else {}
+        self._get_job_badput_breakdown(
+            productive_training_time, total_unproductive_time, total_job_time
+        )
+        if include_badput_breakdown
+        else {}
     )
-    if BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME in job_badput_breakdown:
-      job_goodput -= job_badput_breakdown[
-          BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME
-      ]
 
     # Update the Goodput cache with new information.
     self._goodput_cache.update_cached_entries(self._current_entries)
@@ -785,7 +864,7 @@ class GoodputCalculator:
         GoodputInfo(
             total_productive_time=productive_training_time,
             total_elapsed_time_since_start=total_job_time,
-            total_unproductive_time=job_badput_breakdown,
+            total_unproductive_time=total_unproductive_time,
             last_recorded_step=last_step,
         )
     )
@@ -809,146 +888,109 @@ class GoodputCalculator:
     """
     pass
 
-  def get_job_badput_breakdown(self):
-    """Method to get the the Badput breakdown of the job.
+  def _get_job_badput_breakdown(
+      self, total_productive_time, total_unproductive_time, total_job_time
+  ):
+    """Method to get the the Badput breakdown as percentage of total job time.
 
     This method provides a granular breakdown of the known components of Badput.
+
+    Args:
+      total_productive_time: The total productive training time.
+      total_unproductive_time: A dictionary of computed unproductive time of
+        each BadputType.
+      total_job_time: The total job time.
 
     Returns:
       A dictionary of badput components and their percentage breakdown within
       total job time.
     """
     badput_breakdown = {}
-    total_job_time = self._get_total_job_time()
     if total_job_time == 0.0:
       raise ValueError(
           'Total job time is zero, Badput cannot be calculated. Please fix the'
           ' logging entries.'
       )
-
-    tpu_init_start_time = None
-    training_prep_start_time = None
-    data_loading_start_time = None
-    tpu_initialization_badput = 0.0
-    training_prep_badput = 0.0
-    data_loading_badput = 0.0
-
-    checkpoint_logger_options = CheckpointLoggerOptions(
-        use_goodput_logger=True
+    # TPU initialization badput.
+    tpu_init_badput = total_unproductive_time.get(
+        BadputType.TPU_INITIALIZATION, 0.0
     )
-    checkpoint_badput_calculator = CheckpointBadputCalculator(
-        checkpoint_logger_options
-    )
-    checkpoint_badput_calculator.entries = self._current_entries
-    checkpoint_manager_save_stats = (
-        checkpoint_badput_calculator.calculate_save_operation_checkpoint_manager_blocking_time()
-    )
-    checkpoint_manager_save_badput = (
-        checkpoint_manager_save_stats.total_checkpoint_manager_blocking_time
-    )
-    checkpoint_manager_restore_stats = (
-        checkpoint_badput_calculator.calculate_restore_operation_checkpoint_manager_blocking_time()
-    )
-    checkpoint_manager_restore_badput = (
-        checkpoint_manager_restore_stats.total_checkpoint_manager_time
-    )
-    for payload in self._current_entries:
-      # Compute badput due to TPU initialization.
-      if _TPU_INIT_START_TIME in payload:
-        tpu_init_start_time = payload[_TPU_INIT_START_TIME]
-      elif _TPU_INIT_END_TIME in payload and tpu_init_start_time is not None:
-        tpu_initialization_badput += (
-            payload[_TPU_INIT_END_TIME] - tpu_init_start_time
-        )
-        tpu_init_start_time = None
-
-      # Compute badput due to training preparation.
-      elif _TRAINING_PREPARATION_START_TIME in payload:
-        training_prep_start_time = payload[_TRAINING_PREPARATION_START_TIME]
-      elif (
-          _TRAINING_PREPARATION_END_TIME in payload
-          and training_prep_start_time is not None
-      ):
-        training_prep_badput += (
-            payload[_TRAINING_PREPARATION_END_TIME] - training_prep_start_time
-        )
-        training_prep_start_time = None
-
-      # Compute badput due to data loading.
-      elif _DATA_LOADING_START_TIME in payload:
-        data_loading_start_time = payload[_DATA_LOADING_START_TIME]
-      elif (
-          _DATA_LOADING_END_TIME in payload
-          and data_loading_start_time is not None
-      ):
-        data_loading_badput += (
-            payload[_DATA_LOADING_END_TIME] - data_loading_start_time
-        )
-        data_loading_start_time = None
-
-    if (
-        tpu_initialization_badput > total_job_time
-        or tpu_initialization_badput < 0.0
-    ):
-      raise ValueError(
-          'Total badput from TPU initialization is invalid. Please fix the'
-          ' logging entries.'
-      )
-
     badput_breakdown[BadputType.TPU_INITIALIZATION] = (
-        tpu_initialization_badput / total_job_time
-    ) * 100
-
-    if training_prep_badput > total_job_time or training_prep_badput < 0.0:
-      raise ValueError(
-          'Total badput due to training preparation is invalid. Please fix the'
-          ' logging entries.'
-      )
-    badput_breakdown[BadputType.TRAINING_PREP] = (
-        training_prep_badput / total_job_time
-    ) * 100
-
-    if data_loading_badput > total_job_time or data_loading_badput < 0.0:
-      raise ValueError(
-          'Total badput due to data loading is invalid. Please fix the'
-          ' logging entries.'
-      )
-    badput_breakdown[BadputType.DATA_LOADING] = (
-        data_loading_badput / total_job_time
-    ) * 100
-
-    badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME] = (
-        checkpoint_manager_save_badput / total_job_time
-    ) * 100
-
-    badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME] = (
-        checkpoint_manager_restore_badput / total_job_time
-    ) * 100
-
-    # Collect unproductive time from step times.
-    productive_training_time, unproductive_time, _ = (
-        self._get_total_productive_and_unproductive_time()
+        (tpu_init_badput / total_job_time) * 100
+        if 0 < tpu_init_badput < total_job_time
+        else 0.0
     )
-    if BadputType.PROGRAM_STARTUP in unproductive_time:
-      badput_breakdown[BadputType.PROGRAM_STARTUP] = (
-          unproductive_time[BadputType.PROGRAM_STARTUP] / total_job_time
-      ) * 100
-    else:
-      badput_breakdown[BadputType.PROGRAM_STARTUP] = 0.0
 
-    if BadputType.WASTED_PROGRESS_FROM_DISRUPTION in unproductive_time:
-      badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION] = (
-          unproductive_time[BadputType.WASTED_PROGRESS_FROM_DISRUPTION]
-          / total_job_time
-      ) * 100
-    else:
-      badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION] = 0.0
+    # Training preparation badput.
+    training_prep_badput = total_unproductive_time.get(
+        BadputType.TRAINING_PREP, 0.0
+    )
+    badput_breakdown[BadputType.TRAINING_PREP] = (
+        (training_prep_badput / total_job_time) * 100
+        if 0 < training_prep_badput < total_job_time
+        else 0.0
+    )
+
+    # Data loading badput.
+    data_loading_badput = total_unproductive_time.get(
+        BadputType.DATA_LOADING, 0.0
+    )
+    badput_breakdown[BadputType.DATA_LOADING] = (
+        (data_loading_badput / total_job_time) * 100
+        if 0 < data_loading_badput < total_job_time
+        else 0.0
+    )
+
+    # Unproductive checkpoint save time badput.
+    checkpoint_save_badput = total_unproductive_time.get(
+        BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME, 0.0
+    )
+    badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME] = (
+        (checkpoint_save_badput / total_job_time) * 100
+        if 0 < checkpoint_save_badput < total_job_time
+        else 0.0
+    )
+
+    # Unproductive checkpoint restore time badput.
+    checkpoint_restore_badput = total_unproductive_time.get(
+        BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME, 0.0
+    )
+    badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME] = (
+        (checkpoint_restore_badput / total_job_time) * 100
+        if 0 < checkpoint_restore_badput < total_job_time
+        else 0.0
+    )
+
+    # Program startup badput.
+    program_startup_badput = total_unproductive_time.get(
+        BadputType.PROGRAM_STARTUP, 0.0
+    )
+    badput_breakdown[BadputType.PROGRAM_STARTUP] = (
+        (program_startup_badput / total_job_time) * 100
+        if 0 < program_startup_badput < total_job_time
+        else 0.0
+    )
+
+    # Wasted progress from disruption badput.
+    wasted_progress_from_disruption_badput = total_unproductive_time.get(
+        BadputType.WASTED_PROGRESS_FROM_DISRUPTION, 0.0
+    )
+    badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION] = (
+        (wasted_progress_from_disruption_badput / total_job_time) * 100
+        if 0 < wasted_progress_from_disruption_badput < total_job_time
+        else 0.0
+    )
 
     # Populate the 'Other/Unknown' badput bucket.
-    total_known_badput = sum(badput_breakdown.values())
-    total_goodput = (float(productive_training_time) / total_job_time) * 100
+    other_badput = (
+        total_job_time
+        - total_productive_time
+        - sum(total_unproductive_time.values())
+    )
     badput_breakdown[BadputType.OTHER] = (
-        100.0 - total_goodput - total_known_badput
+        other_badput / total_job_time * 100
+        if 0 < other_badput < total_job_time
+        else 0.0
     )
 
     return badput_breakdown

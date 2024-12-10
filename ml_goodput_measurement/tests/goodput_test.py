@@ -7,7 +7,7 @@ import time
 from typing import Optional
 
 from cloud_goodput.ml_goodput_measurement.src import goodput
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, get_timestamp_from_log_entry
 
 from google3.testing.pybase import googletest
 
@@ -38,10 +38,17 @@ class MockCloudLogger:
     self.entries = []
 
   def write_cloud_logging_entry(self, entry):
-    self.entries.append(entry)
+    timestamp = get_timestamp_from_log_entry(entry)
+    if timestamp is not None:
+      self.entries.append((timestamp, entry))
 
-  def read_cloud_logging_entries(self):
-    return self.entries
+  def read_cloud_logging_entries(self, start_time=None, end_time=None):
+    return [
+        entry
+        for timestamp, entry in self.entries
+        if (start_time is None or timestamp >= start_time)
+        and (end_time is None or timestamp <= end_time)
+    ]
 
 
 @dataclasses.dataclass
@@ -224,9 +231,7 @@ class GoodputTest(googletest.TestCase):
 
     computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
-        (
-            _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
-        )
+        (_TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds())
         / total_time.total_seconds()
         * 100
     )
@@ -584,6 +589,7 @@ class GoodputPathwaysTest(googletest.TestCase):
     )
 
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+
 
 class BadputTest(googletest.TestCase):
 
@@ -1241,9 +1247,7 @@ class BadputTest(googletest.TestCase):
     self.assertIn(BadputType.OTHER, computed_badput_breakdown)
 
     expected_badput_due_to_unknown = (
-        (unknown_badput_time.total_seconds())
-        / total_time.total_seconds()
-        * 100
+        (unknown_badput_time.total_seconds()) / total_time.total_seconds() * 100
     )
     self.assertAlmostEqual(
         computed_badput_breakdown[BadputType.OTHER],
@@ -1395,17 +1399,13 @@ class BadputTest(googletest.TestCase):
     )
 
     expect_badput_due_to_checkpointing_save = (
-        (
-            save_stats.checkpoint_manager_blocking_duration_secs
-        )
+        (save_stats.checkpoint_manager_blocking_duration_secs)
         / total_time.total_seconds()
         * 100
     )
 
     expect_badput_due_to_checkpointing_restore = (
-        (
-            restore_stats.checkpoint_manager_duration_secs
-        )
+        (restore_stats.checkpoint_manager_duration_secs)
         / total_time.total_seconds()
         * 100
     )
@@ -1420,6 +1420,179 @@ class BadputTest(googletest.TestCase):
             BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME
         ],
         expect_badput_due_to_checkpointing_restore,
+    )
+
+  def test_goodput_badput_with_interval_query(self):
+    """Validate computation of goodput and badput with interval query."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    # Mock training preparation.
+    self.goodput_recorder.record_training_preparation_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    self.goodput_recorder.record_training_preparation_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    # Mock data loading.
+    self.goodput_recorder.record_data_loading_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    self.goodput_recorder.record_data_loading_end_time(
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    # Mock training.
+    step_start_time = (
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+    # All steps but first progress with average step time.
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      # Add startup badput during the first step
+      if step == 0:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    intermediate_job_end_time = step_start_time
+
+    # Simulate a 30-second disruption.
+    disruption_time = datetime.timedelta(seconds=30)
+    job_restart_time = step_start_time + disruption_time
+    self.goodput_recorder.record_job_start_time(job_restart_time)
+    step_start_time = (
+        job_restart_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    restart_from_step = 2
+    # All steps but first progress with average step time.
+    for step in range(restart_from_step, _TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      if step == restart_from_step:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + disruption_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Goodput and Badput with the interval query API.
+    (
+        computed_goodput,
+        computed_badput_breakdown,
+        last_step,
+        total_job_time,
+        number_of_disruptions,
+    ) = self.goodput_calculator.get_job_goodput_interval(
+        job_start_time, job_end_time
+    )
+
+    productive_time = _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+    expected_goodput = (
+        (productive_time.total_seconds()) / total_time.total_seconds() * 100
+    )
+    wasted_progress_and_disruption_time = (
+        disruption_time
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+    expected_badput_due_to_disruptions = (
+        (wasted_progress_and_disruption_time.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    # Validate last step
+    self.assertEqual(last_step, _TEST_TOTAL_STEPS - 1)
+    # Validate total job time
+    self.assertEqual(total_job_time, total_time.total_seconds())
+    # Validate number of disruptions
+    self.assertEqual(number_of_disruptions, 1)
+    # Validate Goodput
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+    # Validate Badput
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
+        computed_badput_breakdown,
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
+        expected_badput_due_to_disruptions,
+        delta=0.1,
+    )
+
+    # Update the interval to exclude the disruption and validate new values.
+    (
+        computed_goodput,
+        computed_badput_breakdown,
+        last_step,
+        total_job_time,
+        number_of_disruptions,
+    ) = self.goodput_calculator.get_job_goodput_interval(
+        job_start_time, intermediate_job_end_time
+    )
+
+    productive_time = _TEST_STEP_TIME * (_TEST_TOTAL_STEPS - 1)
+    expected_intermediate_total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + _TEST_STEP_TIME * (_TEST_TOTAL_STEPS - 1)
+    )
+    expected_goodput = (
+        (productive_time.total_seconds())
+        / expected_intermediate_total_time.total_seconds()
+        * 100
+    )
+
+    # Validate last step
+    self.assertEqual(last_step, _TEST_TOTAL_STEPS - 1)
+    # Validate total job time
+    self.assertEqual(
+        total_job_time, expected_intermediate_total_time.total_seconds()
+    )
+    # There should be no disruptions in the interval.
+    self.assertEqual(number_of_disruptions, 0)
+    # Validate Goodput
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+    # Validate Badput
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
+        computed_badput_breakdown,
+    )
+    self.assertEqual(
+        computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION], 0
     )
 
 

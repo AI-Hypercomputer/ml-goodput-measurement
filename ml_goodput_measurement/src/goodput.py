@@ -12,8 +12,7 @@ from typing import Any, Optional
 from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointBadputCalculator
 from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointLoggerOptions
 from cloud_goodput.ml_goodput_measurement.src.goodput_cache import GoodputCache
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import GoodputInfo
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, get_timestamp_from_log_entry
 import numpy as np
 from scipy import stats
 
@@ -390,6 +389,10 @@ class GoodputCalculator:
       self._cloud_logger = _CloudLogger(job_name, logger_name)
     self._current_entries = []
     self._goodput_cache = GoodputCache()
+    self._interval_entries = []
+    self._interval_start_time = None
+    self._interval_end_time = None
+    self._number_of_interruptions = 0
 
   def _get_total_productive_and_unproductive_time(
       self,
@@ -442,7 +445,7 @@ class GoodputCalculator:
     return (0.0, {}, 0)
 
   def _get_current_productive_and_unproductive_time(
-      self,
+      self, interval_query: Optional[bool] = False
   ) -> tuple[float, dict[BadputType, float], int]:
     """Helper function to compute the current productive training time, unproductive time and the last step recorded till now.
 
@@ -582,7 +585,11 @@ class GoodputCalculator:
     tpu_initialization_badput = 0.0
     training_prep_badput = 0.0
     data_loading_badput = 0.0
-    for payload in self._current_entries:
+    entries_to_process = (
+        self._interval_entries if interval_query else self._current_entries
+    )
+    self._number_of_interruptions = 0
+    for payload in entries_to_process:
       if _JOB_START_TIME in payload:
         # Keep track of the latest start to compute badput due to disruption.
         job_start_time = payload[_JOB_START_TIME]
@@ -623,6 +630,7 @@ class GoodputCalculator:
             segment_unproductive_time[
                 BadputType.WASTED_PROGRESS_FROM_DISRUPTION
             ] = wasted_progress_from_disruption
+            self._number_of_interruptions += 1
 
           # The second bucket is individually computed either from recorded
           # logs (TPU initialization, training preparation, data loading) or
@@ -676,7 +684,7 @@ class GoodputCalculator:
     checkpoint_badput_calculator = CheckpointBadputCalculator(
         checkpoint_logger_options
     )
-    checkpoint_badput_calculator.entries = self._current_entries
+    checkpoint_badput_calculator.entries = entries_to_process
     checkpoint_manager_save_stats = (
         checkpoint_badput_calculator.calculate_save_operation_checkpoint_manager_blocking_time()
     )
@@ -717,7 +725,15 @@ class GoodputCalculator:
 
     if job_end_time is not None:
       productive_training_time += job_end_time - step_start_data[last_step]
-    else:
+    elif (
+        interval_query
+        and self._interval_end_time
+        and self._interval_end_time.timestamp() > step_start_data[last_step]
+    ):
+      productive_training_time += (
+          self._interval_end_time.timestamp() - step_start_data[last_step]
+      )
+    elif not interval_query:
       productive_training_time += (
           datetime.datetime.utcnow().timestamp() - step_start_data[last_step]
       )
@@ -795,6 +811,63 @@ class GoodputCalculator:
     else:
       self._current_entries = self._cloud_logger.read_cloud_logging_entries()
 
+  def _get_interval_log_entries(
+      self, start_time: datetime.datetime, end_time: datetime.datetime
+  ):
+    """Helper function to get log entries from an interval window."""
+    if start_time is None or end_time is None:
+      raise ValueError(
+          'Start and end times are required to get log entries from an interval'
+          ' window.'
+      )
+    self._interval_entries = self._cloud_logger.read_cloud_logging_entries(
+        start_time, end_time
+    )
+    logging.info(
+        'Inspecting interval entries between %s and %s', start_time, end_time
+    )
+
+    if not self._interval_entries:
+      raise ValueError(
+          'No log entries found within the interval window between %s and %s.'
+          % (start_time, end_time)
+      )
+
+  def _get_total_job_time_from_interval(
+      self, start_interval: datetime.datetime, end_interval: datetime.datetime
+  ) -> float:
+    """Helper function to compute the total job runtime from interval entries."""
+    # Get the first and last entry's timestamps in the window
+    first_entry_timestamp = get_timestamp_from_log_entry(
+        self._interval_entries[0]
+    )
+    last_entry_timestamp = get_timestamp_from_log_entry(
+        self._interval_entries[-1]
+    )
+
+    # Calculate effective start_time and end_time
+    self._interval_start_time = (
+        max(start_interval, first_entry_timestamp)
+        if first_entry_timestamp
+        else start_interval
+    )
+    self._interval_end_time = (
+        min(end_interval, last_entry_timestamp)
+        if last_entry_timestamp
+        else end_interval
+    )
+
+    # Ensure start_time is not after end_time
+    if self._interval_start_time >= self._interval_end_time:
+      raise ValueError(
+          'Start time is on or after end time, cannot compute total job time.'
+      )
+
+    return (
+        self._interval_end_time.timestamp()
+        - self._interval_start_time.timestamp()
+    )
+
   def get_job_goodput(
       self, include_badput_breakdown=False
   ) -> tuple[float, dict[BadputType, float], int]:
@@ -870,12 +943,18 @@ class GoodputCalculator:
     )
     return job_goodput, job_badput_breakdown, last_step
 
-  def get_job_goodput_interval(self, interval_start, interval_end):
-    """Method to get the Goodput of the job within an interval window.
+  def get_job_goodput_interval(
+      self, interval_start: datetime.datetime, interval_end: datetime.datetime
+  ) -> tuple[float, dict[BadputType, float], int, float, int]:
+    """Method to get the Goodput and Badput breakdown of the job within an interval window.
 
     If the application is interested in retrieving the Goodput of the job within
-    a specific window of time, this method provides the singular Goodput
-    computation between the start and end of this window.
+    a specific window of time, this method provides the metrics computed between
+    the start and end of this window.
+
+    Additionaly, this method returns the last step recorded for the job. This is
+    primarily used for improving monitoring and observability of the job's
+    overall Goodput as a function of number of executed steps.
 
     Args:
       interval_start: The start time of the window for which Goodput is to be
@@ -884,9 +963,52 @@ class GoodputCalculator:
         computed.
 
     Returns:
-      Goodput percentage of the job within specified time window.
+      A tuple containing:
+        - The job's Goodput percentage with respect to the total job time within
+          the interval window.
+        - The Badput Breakdown percentages with respect to the total job time
+          within the interval window.
+        - The last step recorded for the job within the interval window.
+        - The total job time within the interval window.
+        - The number of disruptions within the interval window.
+
+    Raises:
+      ValueError if computed total job time is zero. In this case, Goodput
+      cannot be computed.
+      ValueError if productive training or unproductive time is invalid.
     """
-    pass
+
+    # Get the logs for the interval and validate the interval window.
+    self._get_interval_log_entries(interval_start, interval_end)
+
+    total_job_time = self._get_total_job_time_from_interval(
+        interval_start, interval_end
+    )
+
+    productive_training_time, total_unproductive_time, last_step = (
+        self._get_current_productive_and_unproductive_time(interval_query=True)
+    )
+    if (
+        productive_training_time < 0.0
+        or productive_training_time > total_job_time
+    ):
+      raise ValueError(
+          'Productive training time is invalid. Please fix the logging entries.'
+      )
+    # Return a tuple of calculated Goodput & Badput of the job till now and the
+    # last recorded step.
+    job_goodput = (float(productive_training_time) / total_job_time) * 100
+    job_badput_breakdown = self._get_job_badput_breakdown(
+        productive_training_time, total_unproductive_time, total_job_time
+    )
+
+    return (
+        job_goodput,
+        job_badput_breakdown,
+        last_step,
+        total_job_time,
+        self._number_of_interruptions,
+    )
 
   def _get_job_badput_breakdown(
       self, total_productive_time, total_unproductive_time, total_job_time

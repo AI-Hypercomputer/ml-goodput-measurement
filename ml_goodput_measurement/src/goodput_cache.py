@@ -3,7 +3,7 @@
 import datetime
 from typing import Any, Dict, Optional
 
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, StepInfo
 
 _TIME_ENTRY = 'time'
 _JOB_START_TIME = 'job_start_time'
@@ -18,6 +18,11 @@ class GoodputCache:
     self._last_entry_timestamp = None
     self._job_start_time = None
     self._job_end_time = None
+    self._step_info = None
+
+  def update_step_info(self, step_info: StepInfo):
+    """Updates the step information."""
+    self._step_info = step_info
 
   def update_cached_entries(self, entries: list[Any]):
     """Updated the cached entries."""
@@ -75,4 +80,3 @@ class GoodputCache:
   def is_cache_empty(self) -> bool:
     """Checks if the cache is empty."""
     return not self._cached_entries
-

@@ -3,11 +3,13 @@
 import dataclasses
 from dataclasses import asdict
 import datetime
+import random
 import time
 from typing import Optional
 
 from cloud_goodput.ml_goodput_measurement.src import goodput
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, get_timestamp_from_log_entry
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_timestamp_from_log_entry
 
 from google3.testing.pybase import googletest
 
@@ -1594,6 +1596,52 @@ class BadputTest(googletest.TestCase):
     self.assertEqual(
         computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION], 0
     )
+
+  def _generate_step_start_times(self, number_of_steps: int, start_time):
+    """Generate a list of n non-decreasing datetime objects."""
+    max_step_seconds = 600
+    step_start_times = [start_time]
+    for _ in range(1, number_of_steps):
+      increment = random.randint(1, max_step_seconds)
+      new_time = step_start_times[-1] + datetime.timedelta(seconds=increment)
+      step_start_times.append(new_time)
+    return step_start_times
+
+  def test_get_step_deviation(self):
+    """Test function to validate step deviation computation."""
+    job_start_time = datetime.datetime.utcnow()
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    # Generate a list of 100 step start times with random step times.
+    step_count = 0
+    max_steps = 100
+    test_step_start_times = self._generate_step_start_times(
+        number_of_steps=max_steps, start_time=job_start_time
+    )
+
+    # Record step start times.
+    for step_start_time in test_step_start_times:
+      self.goodput_recorder.record_step_start_time(step_count, step_start_time)
+      step_count += 1
+
+    job_end_time = test_step_start_times[-1] + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    step_times = self.goodput_calculator._get_step_times()
+    ideal_step_time = compute_ideal_step_time(
+        step_times=list(step_times.values()), previous_ideal_step_time=None
+    )
+    computed_step_deviations = self.goodput_calculator.get_step_deviation()
+    expected_step_deviations = {
+        step_count: abs(step_time - ideal_step_time)
+        for step_count, step_time in step_times.items()
+    }
+    for step_count, expected_deviation in expected_step_deviations.items():
+      computed_deviation = computed_step_deviations[step_count]
+      self.assertAlmostEqual(
+          expected_deviation,
+          computed_deviation,
+          delta=0.1,
+      )
 
 
 if __name__ == '__main__':

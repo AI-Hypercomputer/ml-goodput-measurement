@@ -3,6 +3,8 @@
 import datetime
 import enum
 from typing import Any, Optional
+import numpy as np
+from scipy import stats
 
 _TIME_ENTRY = 'time'
 
@@ -34,6 +36,62 @@ class GoodputInfo:
     self.total_elapsed_time_since_start = total_elapsed_time_since_start
     self.total_unproductive_time = total_unproductive_time
     self.last_recorded_step = last_recorded_step
+
+
+class StepInfo:
+  """Step Information."""
+
+  def __init__(
+      self,
+      ideal_step_time: float,
+      step_deviations: dict[int, float],
+  ):
+    self.ideal_step_time = ideal_step_time
+    self.step_deviations = step_deviations
+
+
+def compute_ideal_step_time(
+    step_times: list[float], previous_ideal_step_time: Optional[float]
+) -> float:
+  """Helper function to compute the ideal step time."""
+  # Filter out the normal step times from the step times dictionary.
+  mad = stats.median_abs_deviation(step_times)
+  med = np.median(step_times)
+  normal_step_times = []
+  for step_time in step_times:
+    if step_time <= (med + mad * 3):
+      normal_step_times.append(step_time)
+  mean_normal_step_time = np.mean(normal_step_times)
+  if previous_ideal_step_time is not None:
+    return np.mean([mean_normal_step_time, previous_ideal_step_time])
+  return mean_normal_step_time
+
+
+def get_anomalous_and_normal_step_times(
+    step_times: list[Any],
+) -> tuple[list[Any], list[Any]]:
+  mad = stats.median_abs_deviation(step_times)
+  med = np.median(step_times)
+
+  anomalous_step_times = []
+  normal_step_times = []
+  for step_time in step_times:
+    if step_time > (med + mad * 3):
+      anomalous_step_times.append(step_time)
+    else:
+      normal_step_times.append(step_time)
+
+  return anomalous_step_times, normal_step_times
+
+
+def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
+  anomalous_step_times, normal_step_times = get_anomalous_and_normal_step_times(
+      step_times
+  )
+  normal_step_mean = np.mean(normal_step_times)
+  return sum(anomalous_step_times) - (
+      len(anomalous_step_times) * normal_step_mean
+  )
 
 
 def get_timestamp_from_log_entry(

@@ -12,9 +12,8 @@ from typing import Any, Optional
 from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointBadputCalculator
 from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointLoggerOptions
 from cloud_goodput.ml_goodput_measurement.src.goodput_cache import GoodputCache
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, get_timestamp_from_log_entry
-import numpy as np
-from scipy import stats
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, StepInfo
+from cloud_goodput.ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_extra_time_from_anomalous_steps, get_timestamp_from_log_entry
 
 
 _JOB_NAME = 'job_name'
@@ -454,31 +453,6 @@ class GoodputCalculator:
       (dict of BadputType and unproductive time) and the last step recorded till
       now based on the latest entries retrieved from Cloud Logging.
     """
-
-    def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
-      def get_anomalous_and_normal_step_times(
-          step_times: list[Any],
-      ) -> tuple[list[Any], list[Any]]:
-        mad = stats.median_abs_deviation(step_times)
-        med = np.median(step_times)
-
-        anomalous_step_times = []
-        normal_step_times = []
-        for step_time in step_times:
-          if step_time > (med + mad * 3):
-            anomalous_step_times.append(step_time)
-          else:
-            normal_step_times.append(step_time)
-
-        return anomalous_step_times, normal_step_times
-
-      anomalous_step_times, normal_step_times = (
-          get_anomalous_and_normal_step_times(step_times)
-      )
-      normal_step_mean = np.mean(normal_step_times)
-      return sum(anomalous_step_times) - (
-          len(anomalous_step_times) * normal_step_mean
-      )
 
     def get_segment_productive_and_unproductive_time(
         step_start_data: dict[int, float], curr_step: int
@@ -1009,6 +983,76 @@ class GoodputCalculator:
         total_job_time,
         self._number_of_interruptions,
     )
+
+  def _get_step_times(self):
+    """Helper function to compute step times from the log entries."""
+    step_times = {}
+    previous_step_start_time = None
+    previous_step_count = None
+    for payload in self._current_entries:
+      if _STEP_START_TIME in payload:
+        step_start_time = payload[_STEP_START_TIME]
+        step_count = int(payload[_STEP_COUNT])
+        if (
+            previous_step_start_time is not None
+            and previous_step_count is not None
+            and step_count == previous_step_count + 1
+        ):
+          step_times[previous_step_count] = (
+              step_start_time - previous_step_start_time
+          )
+        previous_step_count = step_count
+        previous_step_start_time = step_start_time
+    return step_times
+
+  def get_step_deviation(
+      self, configured_ideal_step_time: Optional[float] = None
+  ) -> dict[int, float]:
+    """Method to get the step deviation of the current step based on the ideal step time.
+
+    This method computes the ideal step time if one is not provided by the user
+    and returns the step deviation of the current step.
+
+    Args:
+      configured_ideal_step_time: Optional user-defined ideal step time.
+
+    Returns:
+      A dictionary of step deviation for each step.
+    """
+    # Get the log entries.
+    self._update_log_entries()
+    # Compute step times from the log entries.
+    step_times = self._get_step_times()
+    # Get the previous ideal step time from the cache.
+    previous_ideal_step_time = (
+        self._goodput_cache._step_info.ideal_step_time
+        if self._goodput_cache._step_info
+        and self._goodput_cache._step_info.ideal_step_time
+        else None
+    )
+    # Compute ideal step time.
+    ideal_step_time = (
+        configured_ideal_step_time
+        if configured_ideal_step_time is not None
+        else compute_ideal_step_time(
+            step_times=list(step_times.values()),
+            previous_ideal_step_time=previous_ideal_step_time,
+        )
+    )
+
+    # Compute step deviation.
+    step_deviations = {
+        step_count: abs(step_time - ideal_step_time)
+        for step_count, step_time in step_times.items()
+    }
+    # Update the step information in the cache.
+    self._goodput_cache.update_step_info(
+        StepInfo(
+            ideal_step_time=ideal_step_time,
+            step_deviations=step_deviations,
+        )
+    )
+    return step_deviations
 
   def _get_job_badput_breakdown(
       self, total_productive_time, total_unproductive_time, total_job_time

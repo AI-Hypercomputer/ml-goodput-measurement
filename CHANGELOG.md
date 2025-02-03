@@ -21,7 +21,15 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.0.5] - 2025-02-03
+
+* Goodput Cache and library improvements.
+* Query and Monitor API support for checkpoint save and restore.
+* Interval Query API support.
+* Query and Monitor API support for step time deviation.
+
 ## [0.0.4] - 2024-09-13
+
 * Add Badput breakdown to GoodputMonitor.
 * Add Checkpoint Badput Calculator backend.
 * Return last recorded step from Goodput query API.
@@ -30,6 +38,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   * Fix zero job time issue on long running jobs
 
 ## [0.0.3] - 2024-05-28
+
 * Compute and discount Badput from first step after start or restart.
 * Compute and discount Badput due to anomalous step times (Pathways only).
 * Badput recording APIs
@@ -39,16 +48,18 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   * Fix Goodput calculation with disruptions
   * Fix some Cloud Logging latency and batching issues.
 
-
 ## [0.0.2] - 2024-02-29
+
 * Bug Fixes
   * Fixes a typing mismatch in total step time calculation.
 * Code and documentation cleanup
 
 ## [0.0.1] - 2024-02-26
+
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.0.5]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.1...v0.0.2

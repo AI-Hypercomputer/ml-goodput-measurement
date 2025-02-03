@@ -26,7 +26,8 @@
  workloads and utilization of compute resources.
 
  The package also exposes Goodput Monitoring APIs which allow asynchronous query
- and export of the job's Goodput to Tensorboard with configurable upload interval.
+ and export of the job's Goodput, Badput and Step Time Deviation to Tensorboard
+ with configurable upload interval.
 
 ## Components
 
@@ -37,6 +38,7 @@
 
   - `GoodputCalculator`
   - `GoodputMonitor`
+  - `GoodputCache`
 
 
  The `GoodputRecorder`
@@ -51,13 +53,18 @@
  from the training application, either on a CPU instance or on the users'
  development machine.
 
- The `GoodputMonitor` exposes APIs to query and upload goodput data to
- Tensorboard asynchronously. It does this by instantiating a `GoodputCaluclator`
- under the hood.
+ Under the hood, the `GoodputCalculator` uses a `GoodputCache` which is an
+ internal component that locally caches pre-computations and useful logs such
+ that repeated computations can be made inexpensive.
+
+ The `GoodputMonitor` exposes APIs to query and upload goodput and step time
+ deviation data to Tensorboard asynchronously. It does this by instantiating a
+ `GoodputCaluclator` under the hood.
 
 ## Installation
 
- To install the ML Goodput Measurement package, run the following command on the VM:
+ To install the ML Goodput Measurement package, run the following command on the
+ VM or machine you want to query or monitor your workload from:
 
  ```bash
  pip install ml-goodput-measurement
@@ -77,16 +84,31 @@ project, then do the following:
 
 3. [Enable](https://console.cloud.google.com/flows/enableapi?apiid=logging.googleapis.com&_ga=2.27841276.1571868865.1726250448-123998259.1726107009) the Cloud Logging API.
 
-To run your training on Cloud accelerator, set up the environment by following
-instructions [here](https://cloud.google.com/tpu/docs/setup-gcp-account).
+  To run your training on Cloud accelerator, set up the environment by following
+  instructions [here](https://cloud.google.com/tpu/docs/setup-gcp-account).
 
-To learn more about Google Cloud Logging, visit this [page](https://cloud.google.com/logging/docs).
+  To learn more about Google Cloud Logging, visit this [page](https://cloud.google.com/logging/docs).
 
+### Access Scopes
+
+ You will need both read and write access scopes for cloud logging on both the
+ GPU or TPU and CPU node pools. Full cloud logging access is granted by the
+ following access scope during node pool creation:
+
+  - `https://www.googleapis.com/auth/cloud-platform`
+
+   XPK adds this access scope to the GPU, TPU and CPU node pools, so XPK is the recommended method to create clusters and node-pools in you intend to run your workloads on GKE.
+
+   Instructions on how to create clusters using XPK can be
+   found [here](https://github.com/AI-Hypercomputer/xpk/blob/main/README.md#cluster-create) and how to create workloads using XPK can be found
+   [here](https://github.com/AI-Hypercomputer/xpk/blob/main/README.md#workload-create).
+
+   > **_NOTE:_** Access Scopes are immutable and workloads can only be migrated
+  to new node pools with required access scopes. Access scopes on already created clusters cannot be updated.
 
 ### Import
 
  To use this package, import the `goodput` module:
-
 
  ```python
  from ml_goodput_measurement import goodput
@@ -219,6 +241,13 @@ goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own log
 goodput_calculator = goodput.GoodputCalculator(job_name=config.run_name, logger_name=goodput_logger_name)
 ```
 
+If you want to enable Pathways, turn on the `using_pathways` flag:
+
+```python
+goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own logger name.
+goodput_calculator = goodput.GoodputCalculator(job_name=config.run_name, logger_name=goodput_logger_name, using_pathways=True)
+```
+
 #### Retrieve Goodput
 
 Finally, call the `get_job_goodput` API to retrieve Goodput for the entire job run. This API takes an optional parameter `include_badput_breakdown`. which defaults to `False`.
@@ -244,14 +273,71 @@ Following Badput Breakdown buckets are supported by the library at this time:
 # Supported Badput Types
 class BadputType(enum.Enum):
  """The type of Badput."""
- TPU_INITIALIZATION = 1
- TRAINING_PREP = 2
- PROGRAM_STARTUP = 3
- DATA_LOADING = 4
- UNPRODUCTIVE_CHECKPOINTING = 5
- WASTED_PROGRESS_FROM_DISRUPTION = 6
- OTHER = 7
+  TPU_INITIALIZATION = 1
+  TRAINING_PREP = 2
+  PROGRAM_STARTUP = 3
+  DATA_LOADING = 4
+  UNPRODUCTIVE_CHECKPOINT_SAVE_TIME = 5
+  UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME = 6
+  WASTED_PROGRESS_FROM_DISRUPTION = 7
+  OTHER = 8
 ```
+
+#### Badput Breakdown Details
+
+ - Accelerator Initialization Time (TPU_INITIALIZATION)
+
+  This is the time spent on device discovery, slice initialization,
+  device driver re-initialization and reset, security setup, initialization of
+  pre-mapped buffers and more.
+
+ - Training Preparation Time (TRAINING_PREP)
+
+  This is the time spent on the creation of checkpoint managers, checkpoint
+  loading, running mesh and model optimizers and more.
+
+ - Program Startup Time (PROGRAM_STARTUP)
+
+  This is the time spent on framework specific function transformations
+  (such as JAX tracing), compilation tasks, runtime initialization etc.
+
+ - Data Loading Time (DATA_LOADING)
+
+  This is the time spent on loading each batch of data for the training at a
+  step to continue. This should be a small contribution to Badput if parallel
+  data loading is used.
+
+ - Checkpointing Time (UNPRODUCTIVE_CHECKPOINT_SAVE_TIME, UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME)
+
+  This is the time spent on saving a checkpoint and restoring a checkpoint.
+
+  Depending on the type of checkpointing technology used by the program, there
+  could be unproductive time while saving a checkpoint. When checkpointing is
+  synchronous, the save operation will block training progress until it is complete.
+
+  During asynchronous checkpointing, the model parameters or weights have to be
+  transferred from the device memory to the host memory which is a blocking
+  operation on the device. After the transfer, the device can proceed with model
+  training while the CPU saves the checkpoint to storage in the background. The
+  first blocking operation contributes to unproductive checkpoint time.
+
+  If auto checkpointing is used, the checkpoint save operation is initiated upon
+  detection of a planned disruption signal. The save operation in type of
+  checkpointing is synchronous resulting in time lost to Badput.
+
+ - Wasted Progress due to Disruption (WASTED_PROGRESS_FROM_DISRUPTION)
+
+ Based on checkpointing frequency, a disruption may result in time lost in the
+ form of wasted progress, i.e. time that was spent on productive training but
+ lost after restart.
+
+  When there is a disruption, Badput is expected to accumulate in
+  each of the following buckets after restart:
+
+  - Accelerator Initialization
+  - Training Preparation
+  - Program Startup
+  - Wasted Progress due to Disruption
 
 If you are interested in retrieving Badput Breakdown along with Goodput:
 
@@ -264,6 +350,31 @@ print(f"Badput due to training preparation: {badput_breakdown[goodput.BadputType
 print(f"Badput due to program startup: {badput_breakdown[goodput.BadputType.PROGRAM_STARTUP]:.2f}%")
 print(f"Badput due to data loading: {badput_breakdown[goodput.BadputType.DATA_LOADING]:.2f}%")
 print(f"Badput due to disruption and wasted progress: {badput_breakdown[goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION]:.2f}%")
+```
+
+#### Interval Query Goodput and Badput
+
+If you are interested in retrieving Goodput and Badput of the workload within a
+specific window of time, the `GoodputCalculator` exposes the
+`get_job_goodput_interval` API which computes metrics between the start and end
+of this window.
+
+This API also returns the last step recorded for the job. the total job time in
+this window and the number of disruptions within the interval window.
+
+> **_IMPORTANT:_** **Use this API if** you know the exact window of time within the workload's total run time that you are interested in.
+
+> **_IMPORTANT:_** **Do NOT use this API if** your workload has been manually disrupted. 
+
+> **_IMPORTANT:_** **Do NOT use this API if** you have accidentally re-used a previous `run_name`.
+
+```python
+# Example usage
+start_time_str = "2024-12-16 1:05:00"
+start_time_utc = convert_pst_to_utc(start_time_str)
+end_time_str = "2024-12-17 2:00:00"
+end_time_utc = convert_pst_to_utc(end_time_str)
+current_goodput, badput_breakdown, last_step, total_time, disruptions = goodput_calculator.get_job_goodput_interval(start_time_utc, end_time_utc)
 ```
 
 ### Monitor Goodput with `GoodputMonitor`
@@ -307,11 +418,61 @@ goodput_monitor = monitoring.GoodputMonitor(
     )
 ```
 
+If you want to enable Pathways, turn on the `pathway_enabled` flag:
+
+```python
+goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own logger name.
+goodput_monitoring_enabled = config.monitor_goodput and jax.process_index() == 0 # Check for configs whether or not the enable monitoring.
+
+goodput_monitor = monitoring.GoodputMonitor(
+      job_name=config.run_name,
+      logger_name=logger_name,
+      tensorboard_dir=config.tensorboard_dir,
+      upload_interval=config.goodput_upload_interval_seconds,
+      monitoring_enabled=True,
+      include_badput_breakdown=True,
+      pathway_enabled=True
+    )
+```
+
+If you want to monitor Step Time Deviation, configure the `GoodputMonitor` as follows:
+
+```python
+goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own logger name.
+goodput_monitoring_enabled = config.monitor_goodput and jax.process_index() == 0 # Check for configs whether or not the enable monitoring.
+
+goodput_monitor = monitoring.GoodputMonitor(
+      job_name=config.run_name,
+      logger_name=logger_name,
+      tensorboard_dir=config.tensorboard_dir,
+      upload_interval=config.goodput_upload_interval_seconds,
+      monitoring_enabled=True,
+      include_badput_breakdown=True,
+      include_step_deviation=True,
+      configured_ideal_step_time=None # Optional, the library will compute ideal step time if it is not provided
+    )
+```
+
 #### Start asynchronous "query and upload" of Goodput
 
-Call the `start_goodput_uploader` API to spin off a thread which continuously queries and uploads Goodput.
+Call the `start_goodput_uploader` API to spin off a thread which continuously
+queries and uploads Goodput.
 
 ```python
 goodput_monitor.start_goodput_uploader()
 ```
+
+#### Start asynchronous "query and upload" of Step Time Deviation
+
+Call the `start_step_deviation_uploader` API to spin off a thread which
+continuously queries and uploads step time deviation.
+
+```python
+goodput_monitor.start_step_deviation_uploader()
+```
+
+#### Visualize on Tensorboard
+
+1. Make sure you have `tensorboard-plugin-profile`, `tensorflow` and `tensorboard` packages installed
+2. Follow instructions [here](https://cloud.google.com/tpu/docs/profile-tpu-vm#start_profiling_the_model_training) to start the Tensorboard server
 

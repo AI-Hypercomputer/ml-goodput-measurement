@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from cloud_goodput.ml_goodput_measurement.src import checkpoint_badput_calculator
-from cloud_goodput.ml_goodput_measurement.src import goodput
-from cloud_goodput.ml_goodput_measurement.src import goodput_cache
-from cloud_goodput.ml_goodput_measurement.src import goodput_utils
-from cloud_goodput.ml_goodput_measurement.src import monitoring
+from ml_goodput_measurement.src import checkpoint_badput_calculator
+from ml_goodput_measurement.src import goodput
+from ml_goodput_measurement.src import goodput_cache
+from ml_goodput_measurement.src import goodput_utils
+from ml_goodput_measurement.src import monitoring
+from ml_goodput_measurement.src import gcp_metrics

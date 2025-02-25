@@ -1,16 +1,13 @@
 """Tests to unit test GoodputCache class."""
 
 import datetime
-from unittest import mock
+from absl.testing import absltest
 
-from cloud_goodput.ml_goodput_measurement.src import goodput_cache
-from cloud_goodput.ml_goodput_measurement.src import goodput_utils
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
-
-from google3.testing.pybase import googletest
+from ml_goodput_measurement.src import goodput_cache
+from ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
 
 
-class GoodputCacheTest(googletest.TestCase):
+class GoodputCacheTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -130,4 +127,4 @@ class GoodputCacheTest(googletest.TestCase):
 
 
 if __name__ == '__main__':
-  googletest.main()
+  absltest.main()

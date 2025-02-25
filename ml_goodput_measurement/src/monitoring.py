@@ -9,9 +9,13 @@ import os
 import threading
 import time
 
-from cloud_goodput.ml_goodput_measurement.src.goodput import GoodputCalculator
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
+from ml_goodput_measurement.src.gcp_metrics import GCPMetrics
+from ml_goodput_measurement.src.gcp_metrics import ValueType
+from ml_goodput_measurement.src.goodput import GoodputCalculator
+from ml_goodput_measurement.src.goodput_utils import BadputType
+from ml_goodput_measurement.src.goodput_utils import check_gcloud_auth
 from tensorboardX import writer
+
 
 _TENSORBOARD_GCS_SUBDIR = 'goodput'
 _TENSORBOARD_GOODPUT_LABEL = 'goodput'
@@ -36,26 +40,38 @@ class GoodputMonitor:
       include_step_deviation=False,
       configured_ideal_step_time=None,
       step_deviation_interval_seconds=10,
+      project_id: str = None,
+      location: str = None,
+      replica_id: str = None,
+      acc_type: str = None,
+      send_metrics_to_gcp: bool = False,
   ):
     """Initializes the GoodputMonitor.
 
     Args:
-        job_name: The name of the job to monitor.
-        logger_name: The name of the Google Cloud Logging logger to use.
-        tensorboard_dir: The directory to write TensorBoard data to.
-        upload_interval: The interval to upload data to TensorBoard.
-        monitoring_enabled: Whether to enable monitoring. If the application is
-          interested in monitoring Goodput, it should set this value to True if
-          monitoring from TPU worker 0 andthe application's configurations
-          request Goodput monitoring.
-        pathway_enabled: Whether the application is using Pathways.
-        include_badput_breakdown: Whether to query and upload badput breakdown
-          data to Tensorboard.
-        include_step_deviation: Whether to query and upload step deviation data
-          to Tensorboard.
-        step_deviation_interval_seconds: The interval to query step deviation
-          data.
-        configured_ideal_step_time: The optionalideal step time configured by the user.
+      job_name: The name of the job to monitor.
+      logger_name: The name of the Google Cloud Logging logger to use.
+      tensorboard_dir: The directory to write TensorBoard data to.
+      upload_interval: The interval to upload data to TensorBoard and GCP
+        Monitoring.
+      monitoring_enabled: Whether to enable monitoring. If the application is
+        interested in monitoring Goodput, it should set this value to True if
+        monitoring from TPU worker 0 andthe application's configurations
+        request Goodput monitoring.
+      pathway_enabled: Whether the application is using Pathways.
+      include_badput_breakdown: Whether to query and upload badput breakdown
+        data to Tensorboard.
+      include_step_deviation: Whether to query and upload step deviation data
+        to Tensorboard.
+      configured_ideal_step_time: The optional ideal step time configured by
+        the user.
+      step_deviation_interval_seconds: The interval to query step deviation
+        data.
+      project_id: The GCP project ID to send metrics to.
+      location: The GCP location of the workload.
+      replica_id: The GCP replica ID of the workload.
+      acc_type: The accelerator type of the workload.
+      send_metrics_to_gcp: Whether to send metrics to GCP Monitoring.
     """
     if not monitoring_enabled:
       logger.info(
@@ -99,6 +115,17 @@ class GoodputMonitor:
     self._step_deviation_upload_thread = None
     self._step_deviation_termination_event = threading.Event()
     self._step_deviation_termination_event.clear()
+
+    # GCP Monitoring configurations.
+    self._project_id = project_id
+    self._location = location
+    self._replica_id = replica_id
+    self._acc_type = acc_type
+    self._send_metrics_to_gcp = send_metrics_to_gcp
+    self._metrics_sender = None
+    self._gcp_metrics_thread = None
+    if self._send_metrics_to_gcp:
+      self._metrics_sender = GCPMetrics(project_id=self._project_id)
 
   def __del__(self):
     if self._uploader_thread_running:
@@ -158,6 +185,54 @@ class GoodputMonitor:
             e,
         )
 
+  def _send_goodput_metrics_to_gcp(self):
+    """Sends goodput and badput metrics to GCP Monitoring."""
+    while not self._termination_event.is_set():
+      time.sleep(self._upload_interval)
+      try:
+        goodput_details = self._goodput_calculator.get_job_goodput_details()
+        goodput_metrics = []
+        for goodput_type, time_value in goodput_details['goodput_time'].items():
+          goodput_metrics.append({
+              'metric_type': 'compute.googleapis.com/workload/goodput_time',
+              'value': time_value,
+              'value_type': ValueType.DOUBLE,
+              'metric_labels': {
+                  'goodput_source': goodput_type.name,
+                  'accelerator_type': self._acc_type,
+              },
+              'resource_type': 'compute.googleapis.com/Workload',
+              'resource_labels': {
+                  'location': self._location,
+                  'workload_id': self._job_name,
+                  'replica_id': self._replica_id,
+              },
+          })
+        for badput_type, time_value in goodput_details['badput_time'].items():
+          goodput_metrics.append({
+              'metric_type': 'compute.googleapis.com/workload/badput_time',
+              'value': time_value,
+              'value_type': ValueType.DOUBLE,
+              'metric_labels': {
+                  'badput_source': badput_type.name,
+                  'accelerator_type': self._acc_type,
+              },
+              'resource_type': 'compute.googleapis.com/Workload',
+              'resource_labels': {
+                  'location': self._location,
+                  'workload_id': self._job_name,
+                  'replica_id': self._replica_id,
+              },
+          })
+        if self._metrics_sender:
+          self._metrics_sender.send_metrics(goodput_metrics)
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error(
+            'Error while sending goodput metrics to GCP Monitoring. This'
+            ' will not impact the workload. Error: %s',
+            e,
+        )
+
   def start_goodput_uploader(self):
     """Starts the goodput uploader thread."""
     if self._uploader_thread_running:
@@ -173,7 +248,23 @@ class GoodputMonitor:
         self._job_name,
         self._logger_name,
     )
+
     self._goodput_upload_thread.start()
+
+    # Start the GCP metrics sender thread
+    if self._metrics_sender:
+      check_gcloud_auth(self._project_id)
+      self._gcp_metrics_thread = threading.Thread(
+          target=self._send_goodput_metrics_to_gcp, daemon=True
+      )
+      logger.info(
+          'Starting GCP metrics sender thread in the background for job:'
+          ' %s and logger: %s',
+          self._job_name,
+          self._logger_name,
+      )
+      self._gcp_metrics_thread.start()
+
     self._uploader_thread_running = True
 
   def stop_goodput_uploader(self):
@@ -185,10 +276,19 @@ class GoodputMonitor:
     if self._goodput_upload_thread is not None:
       logger.info('Waiting for goodput query and uploader thread to complete.')
       self._goodput_upload_thread.join()
+      self._goodput_upload_thread = None
     logger.info(
         'Goodput query and uploader thread stopped. No more goodput data will'
         ' be uploaded to Tensorboard.'
     )
+
+    # Stop the GCP metrics sender thread
+    if self._gcp_metrics_thread is not None:
+      logger.info('Waiting for GCP metrics sender thread to complete.')
+      self._gcp_metrics_thread.join()
+      self._gcp_metrics_thread = None
+      logger.info('GCP metrics sender thread stopped.')
+
     self._uploader_thread_running = False
 
   def _write_step_deviation_to_tensorboard(

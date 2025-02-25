@@ -9,11 +9,11 @@ import datetime
 import logging
 from typing import Any, Optional
 
-from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointBadputCalculator
-from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointLoggerOptions
-from cloud_goodput.ml_goodput_measurement.src.goodput_cache import GoodputCache
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, StepInfo
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_extra_time_from_anomalous_steps, get_timestamp_from_log_entry
+from ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointBadputCalculator
+from ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointLoggerOptions
+from ml_goodput_measurement.src.goodput_cache import GoodputCache
+from ml_goodput_measurement.src.goodput_utils import GoodputType, BadputType, GoodputInfo, StepInfo
+from ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_extra_time_from_anomalous_steps, get_timestamp_from_log_entry
 
 
 _JOB_NAME = 'job_name'
@@ -70,8 +70,8 @@ class _CloudLogger:
 
   def _get_filter_msg(
       self,
-      start_time: datetime.datetime | None,
-      end_time: datetime.datetime | None,
+      start_time: Optional[datetime.datetime],
+      end_time: Optional[datetime.datetime],
   ) -> str:
     """Gets the filter message for the Cloud Logging query."""
     filter_entries = [
@@ -432,7 +432,7 @@ class GoodputCalculator:
 
   def _get_cached_productive_and_unproductive_time(
       self,
-  ) -> tuple[float, dict[BadputType, float] | None, int]:
+  ) -> tuple[float, Optional[dict[BadputType, float]], int]:
     """Helper function to retrieve the cached productive training time and unproductive time."""
     goodput_info = self._goodput_cache._goodput_info
     if not self._goodput_cache.is_cache_empty() and goodput_info is not None:
@@ -1160,3 +1160,37 @@ class GoodputCalculator:
     )
 
     return badput_breakdown
+
+  def get_job_goodput_details(self) -> dict[str, float]:
+    """Method to get the productive and non-productive time with breakdown of the job computed until now."""
+
+    total_job_time = self._get_total_job_time()
+    # No calculations can be made if total job time is zero. This can happen if
+    # logs for the job are not present, sent to an invalid location or contain
+    # bad data. Raise a ValueError if this happens.
+    if total_job_time == 0.0:
+      raise ValueError(
+          'Total job time is zero, Goodput cannot be calculated. Please fix the'
+          ' logging entries.'
+      )
+    productive_training_time, total_unproductive_time, _ = (
+        self._get_total_productive_and_unproductive_time()
+    )
+    if (
+        productive_training_time < 0.0
+        or productive_training_time > total_job_time
+    ):
+      raise ValueError(
+          'Productive training time is invalid. Please fix the logging entries.'
+      )
+    # Currently productive_time is not split based on productive activities, it
+    # is just the total productive time. We will modify this to follow the same
+    # format as badput_breakdown. Please update this code accordingly in the
+    # future when we have more granular breakdown of productive time.
+
+    total_productive_time = {GoodputType.TOTAL: productive_training_time}
+
+    return {
+        'goodput_time': total_productive_time,
+        'badput_time': total_unproductive_time,
+    }

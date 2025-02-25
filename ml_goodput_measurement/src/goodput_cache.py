@@ -3,7 +3,7 @@
 import datetime
 from typing import Any, Dict, Optional
 
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, StepInfo
+from ml_goodput_measurement.src.goodput_utils import GoodputInfo, StepInfo
 
 _TIME_ENTRY = 'time'
 _JOB_START_TIME = 'job_start_time'

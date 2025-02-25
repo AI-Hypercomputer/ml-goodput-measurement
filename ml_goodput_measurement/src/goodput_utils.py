@@ -2,11 +2,21 @@
 
 import datetime
 import enum
+import subprocess
 from typing import Any, Optional
+
 import numpy as np
 from scipy import stats
 
+
 _TIME_ENTRY = 'time'
+
+# Productive time is not broken down by activities yet. As such, we only have
+# one type of Goodput which contributes to the total productive time.
+class GoodputType(enum.Enum):
+  """The type of Goodput."""
+
+  TOTAL = 1
 
 
 class BadputType(enum.Enum):
@@ -96,7 +106,7 @@ def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
 
 def get_timestamp_from_log_entry(
     entry: dict[str, Any],
-) -> datetime.datetime | None:
+) -> Optional[datetime.datetime]:
   """Helper function to get the timestamp from a log entry."""
   timestamp_posix_time = [
       entry_value
@@ -108,3 +118,35 @@ def get_timestamp_from_log_entry(
         timestamp_posix_time[0], datetime.timezone.utc
     )
   return None
+
+
+def check_gcloud_auth(project_id: str):
+  """Checks if gcloud is authenticated and set to the correct project."""
+  try:
+    # Check if gcloud is authenticated
+    process = subprocess.run(
+        ['gcloud', 'auth', 'list'],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    if 'ACTIVE' not in process.stdout:
+      raise ValueError(
+          'gcloud is not authenticated. Please run `gcloud auth login`.'
+      )
+
+    # Check if the project is set correctly
+    process = subprocess.run(
+        ['gcloud', 'config', 'get-value', 'project'],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if process.stdout.strip() != project_id:
+      raise ValueError(
+          'gcloud is not set to the correct project. Please run `gcloud config'
+          f' set project {project_id}`.'
+      )
+
+  except Exception as e:
+    raise ValueError('Error checking gcloud authentication.') from e

@@ -44,7 +44,7 @@ class GoodputMonitor:
       location: str = None,
       replica_id: str = None,
       acc_type: str = None,
-      send_metrics_to_gcp: bool = False,
+      send_metrics_to_gcp: bool = True,
   ):
     """Initializes the GoodputMonitor.
 
@@ -71,7 +71,8 @@ class GoodputMonitor:
       location: The GCP location of the workload.
       replica_id: The GCP replica ID of the workload.
       acc_type: The accelerator type of the workload.
-      send_metrics_to_gcp: Whether to send metrics to GCP Monitoring.
+      send_metrics_to_gcp: Whether to send metrics to GCP Monitoring. Default is
+        True.
     """
     if not monitoring_enabled:
       logger.info(

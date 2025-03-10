@@ -303,6 +303,8 @@ class GoodputMonitor:
   def _send_step_deviation_metric_to_gcp(self, step_deviations):
     """Sends step deviation metric to GCP Monitoring."""
     try:
+      if not step_deviation:
+        return
       avg_step_deviation = sum(step_deviations.values()) / len(
           step_deviations
       )

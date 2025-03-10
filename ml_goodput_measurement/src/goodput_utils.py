@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 import enum
 import logging
+import math
 from typing import Any, Optional
 
 import numpy as np

@@ -119,7 +119,7 @@ def compute_ideal_step_time(
     if step_time <= (med + mad * 3):
       normal_step_times.append(step_time)
   mean_normal_step_time = np.mean(normal_step_times)
-  if previous_ideal_step_time is not None:
+  if previous_ideal_step_time is not None and not math.isnan(previous_ideal_step_time):
     return np.mean([mean_normal_step_time, previous_ideal_step_time])
   return mean_normal_step_time
 

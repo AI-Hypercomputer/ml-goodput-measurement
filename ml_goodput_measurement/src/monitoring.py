@@ -304,10 +304,17 @@ class GoodputMonitor:
     """Sends step deviation metric to GCP Monitoring."""
     try:
       if not step_deviations:
+        logger.warning(
+            'Step deviation is empty. This will not impact the workload.'
+        )
         return
-      avg_step_deviation = sum(step_deviations.values()) / len(
-          step_deviations
-      )
+      avg_step_deviation = sum(step_deviations.values()) / len(step_deviations)
+
+      if math.isnan(avg_step_deviation):
+        logger.warning(
+            'Step deviation is NaN. This will not impact the workload.'
+        )
+        return
       perf_metric = [{
           'metric_type': 'compute.googleapis.com/workload/performance',
           'value': avg_step_deviation,

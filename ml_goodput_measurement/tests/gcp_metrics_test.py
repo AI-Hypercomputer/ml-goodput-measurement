@@ -1,12 +1,15 @@
 """Tests for GCP metrics."""
+
 from unittest import mock
 
 from absl.testing import absltest
+from ml_goodput_measurement.src import gcp_metrics
 from google.api_core import exceptions
 from google.cloud import monitoring_v3
-from ml_goodput_measurement.src.gcp_metrics import GCPMetrics
-from ml_goodput_measurement.src.gcp_metrics import ValueType
 
+
+ValueType = gcp_metrics.ValueType
+GCPMetrics = gcp_metrics.GCPMetrics
 patch = mock.patch
 GoogleAPIError = exceptions.GoogleAPIError
 
@@ -16,7 +19,7 @@ class GCPMetricsTest(absltest.TestCase):
   @patch("google.cloud.monitoring_v3.MetricServiceClient")
   def setUp(self, mock_client):
     super().setUp()
-    self.mock_client = mock_client.return_value  # Use return_value
+    self.mock_client = mock_client.return_value
     self.project_id = "test-project"
     self.metrics_sender = GCPMetrics(self.project_id)
 
@@ -69,17 +72,16 @@ class GCPMetricsTest(absltest.TestCase):
           time_series.points[0].value.distribution_value, value
       )
 
-  @patch("time.time")  # Mock time.time()
+  @patch("time.time")
   def test_send_metrics(self, mock_time):
     # Set a fixed return value for the mocked time.time()
-    mock_time.return_value = 1677347200.5  # Example timestamp
+    mock_time.return_value = 1677347200.5
 
     metrics_to_send = [
         {
             "metric_type": "compute.googleapis.com/workload/goodput_time",
             "value": 42.0,
             "value_type": ValueType.DOUBLE,
-            "metric_labels": {"source": "test1"},
             "resource_type": "test_resource",
             "resource_labels": {"loc": "us"},
         },
@@ -124,7 +126,7 @@ class GCPMetricsTest(absltest.TestCase):
       self.assertEqual(actual.resource.labels, expected.resource.labels)
       self.assertEqual(actual.metric.labels, expected.metric.labels)
 
-  @patch("logging.error")  # Mock logging.error
+  @patch("ml_goodput_measurement.src.gcp_metrics.logger.error")
   def test_send_metrics_failure(self, mock_logging_error):
 
     self.mock_client.create_time_series.side_effect = GoogleAPIError(
@@ -142,8 +144,7 @@ class GCPMetricsTest(absltest.TestCase):
     ]
 
     self.metrics_sender.send_metrics(metrics_to_send)
-    mock_logging_error.assert_called_once()  # Check that error was logged.
-
+    mock_logging_error.assert_called_once()
 
 if __name__ == "__main__":
   absltest.main()

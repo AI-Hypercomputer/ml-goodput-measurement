@@ -11,7 +11,7 @@ from ml_goodput_measurement.src import goodput
 from ml_goodput_measurement.src.goodput_utils import BadputType
 from ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_timestamp_from_log_entry
 
-from absl.testing import absltest
+from google3.testing.pybase import googletest
 
 
 # Fake job timeline information for test purposes.
@@ -122,7 +122,7 @@ class MockRestoreStepStatistics:
   checkpoint_manager_duration_secs: Optional[float] = None
 
 
-class GoodputTest(absltest.TestCase):
+class GoodputTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -241,7 +241,7 @@ class GoodputTest(absltest.TestCase):
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
 
 
-class GoodputDisruptionCompleteRestartTest(absltest.TestCase):
+class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -314,7 +314,7 @@ class GoodputDisruptionCompleteRestartTest(absltest.TestCase):
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
 
 
-class GoodputDisruptionPartialRestartTest(absltest.TestCase):
+class GoodputDisruptionPartialRestartTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -450,7 +450,7 @@ class GoodputDisruptionPartialRestartTest(absltest.TestCase):
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
 
 
-class GoodputPathwaysTest(absltest.TestCase):
+class GoodputPathwaysTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -593,7 +593,7 @@ class GoodputPathwaysTest(absltest.TestCase):
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
 
 
-class BadputTest(absltest.TestCase):
+class BadputTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -1645,4 +1645,4 @@ class BadputTest(absltest.TestCase):
 
 
 if __name__ == '__main__':
-  absltest.main()
+  googletest.main()

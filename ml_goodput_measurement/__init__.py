@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from ml_goodput_measurement.src import checkpoint_badput_calculator
+from ml_goodput_measurement.src import gcp_metrics
 from ml_goodput_measurement.src import goodput
 from ml_goodput_measurement.src import goodput_cache
 from ml_goodput_measurement.src import goodput_utils

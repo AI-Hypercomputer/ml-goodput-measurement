@@ -935,7 +935,7 @@ class GoodputCalculator:
             total_elapsed_time_since_start=total_job_time,
             total_unproductive_time=total_unproductive_time,
             last_recorded_step=last_step,
-            last_recorded_timestamp=self._goodput_cache._last_entry_timestamp,
+            last_updated_timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
     )
     return job_goodput, job_badput_breakdown, last_step
@@ -1203,37 +1203,30 @@ class GoodputCalculator:
     (
         productive_training_time,
         total_unproductive_time,
-        cache_last_recorded_timestamp,
+        cache_last_updated_timestamp,  # This is the timestamp when the cache was updated.
     ) = (
         goodput_info.total_productive_time,
         goodput_info.total_unproductive_time,
-        goodput_info.last_recorded_timestamp,
+        goodput_info.last_updated_timestamp,
     )
 
     if (
         self._gcm_last_recorded_timestamp is not None  # Ignore the first entry.
-        and self._gcm_last_recorded_timestamp == cache_last_recorded_timestamp
+        and self._gcm_last_recorded_timestamp >= cache_last_updated_timestamp
     ):
-      logger.warning('No new data, skipping upload to GCM.')
-      return {
-          'goodput_time_dict': {},
-          'badput_time_dict': {},
-      }
-
-    if (
-        self._gcm_last_recorded_timestamp is not None
-        and self._gcm_last_recorded_timestamp > cache_last_recorded_timestamp
-    ):
-      logger.error(
-          'GCM last recorded timestamp is greater than cache last recorded'
-          ' timestamp. This should not happen.'
+      logger.warning(
+          'No new data, skipping upload to GCM. Cache Timestamp: %s, GCM'
+          ' Timestamp: %s', cache_last_updated_timestamp,
+          self._gcm_last_recorded_timestamp,
       )
       return {
           'goodput_time_dict': {},
           'badput_time_dict': {},
       }
 
-    self._gcm_last_recorded_timestamp = cache_last_recorded_timestamp
+    self._gcm_last_recorded_timestamp = datetime.datetime.now(
+        datetime.timezone.utc
+    )
 
     # Currently productive_time is not split based on productive activities, it
     # is just the total productive time. We will modify this to follow the same

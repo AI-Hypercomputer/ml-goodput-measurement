@@ -77,7 +77,9 @@ class GoodputInfo:
       total_elapsed_time_since_start: float = 0.0,
       total_unproductive_time: Optional[dict[BadputType, float]] = None,
       last_recorded_step: int = 0,
-      last_recorded_timestamp: datetime.datetime = datetime.datetime.min,
+      last_updated_timestamp: datetime.datetime = datetime.datetime.now(
+          datetime.timezone.utc
+      ),
   ):
     self.total_productive_time = total_productive_time
     self.total_elapsed_time_since_start = total_elapsed_time_since_start
@@ -93,7 +95,7 @@ class GoodputInfo:
         total_unproductive_time or {}
     )
     self.last_recorded_step = last_recorded_step
-    self.last_recorded_timestamp = last_recorded_timestamp
+    self.last_updated_timestamp = last_updated_timestamp
 
 
 class StepInfo:

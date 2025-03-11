@@ -67,7 +67,7 @@
  VM or machine you want to query or monitor your workload from:
 
  ```bash
- pip install ml-goodput-measurement
+ pip install git+https://github.com/Perseus14/ml-goodput-measurement.git
  ```
 
 ## Usage

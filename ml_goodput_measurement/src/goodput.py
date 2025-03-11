@@ -412,7 +412,7 @@ class GoodputCalculator:
     self._interval_start_time = None
     self._interval_end_time = None
     self._number_of_interruptions = 0
-    self._previous_recorded_timestamp = None
+    self._gcm_last_recorded_timestamp = None
 
   def _get_total_productive_and_unproductive_time(
       self,
@@ -1203,7 +1203,7 @@ class GoodputCalculator:
     (
         productive_training_time,
         total_unproductive_time,
-        last_recorded_timestamp,
+        cache_last_recorded_timestamp,
     ) = (
         goodput_info.total_productive_time,
         goodput_info.total_unproductive_time,
@@ -1211,20 +1211,35 @@ class GoodputCalculator:
     )
 
     if (
-        self._previous_recorded_timestamp is not None  # Ignore the first entry.
-        and self._previous_recorded_timestamp >= last_recorded_timestamp
+        self._gcm_last_recorded_timestamp is not None  # Ignore the first entry.
+        and self._gcm_last_recorded_timestamp == cache_last_recorded_timestamp
     ):
-      raise ValueError(
-          'Last recorded timestamp is less than or equal to the previous'
-          ' recorded timestamp. Please fix the logging entries.'
+      logger.warning('No new data, skipping upload to GCM.')
+      return {
+          'goodput_time_dict': {},
+          'badput_time_dict': {},
+      }
+
+    if (
+        self._gcm_last_recorded_timestamp is not None
+        and self._gcm_last_recorded_timestamp > cache_last_recorded_timestamp
+    ):
+      logger.error(
+          'GCM last recorded timestamp is greater than cache last recorded'
+          ' timestamp. This should not happen.'
       )
+      return {
+          'goodput_time_dict': {},
+          'badput_time_dict': {},
+      }
+
+    self._gcm_last_recorded_timestamp = cache_last_recorded_timestamp
 
     # Currently productive_time is not split based on productive activities, it
     # is just the total productive time. We will modify this to follow the same
     # format as badput_breakdown. Please update this code accordingly in the
     # future when we have more granular breakdown of productive time.
 
-    self._previous_recorded_timestamp = last_recorded_timestamp
     total_productive_time = {GoodputType.TOTAL: productive_training_time}
 
     return {

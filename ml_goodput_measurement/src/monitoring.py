@@ -316,6 +316,7 @@ class GoodputMonitor:
             'Step deviation is NaN. This will not impact the workload.'
         )
         return
+
       perf_metric = [{
           'metric_type': 'compute.googleapis.com/workload/performance',
           'value': avg_step_deviation,

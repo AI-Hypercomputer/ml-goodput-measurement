@@ -7,9 +7,9 @@ import random
 import time
 from typing import Optional
 
-from cloud_goodput.ml_goodput_measurement.src import goodput
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_timestamp_from_log_entry
+from ml_goodput_measurement.src import goodput
+from ml_goodput_measurement.src.goodput_utils import BadputType
+from ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_timestamp_from_log_entry
 
 from google3.testing.pybase import googletest
 

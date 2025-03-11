@@ -3,9 +3,9 @@
 import datetime
 from unittest import mock
 
-from cloud_goodput.ml_goodput_measurement.src import goodput_cache
-from cloud_goodput.ml_goodput_measurement.src import goodput_utils
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
+from ml_goodput_measurement.src import goodput_cache
+from ml_goodput_measurement.src import goodput_utils
+from ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
 
 from google3.testing.pybase import googletest
 

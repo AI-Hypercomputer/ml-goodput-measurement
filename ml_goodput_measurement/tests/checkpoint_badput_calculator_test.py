@@ -4,9 +4,9 @@ import dataclasses
 from typing import Optional
 
 from absl.testing import absltest
-from cloud_goodput.ml_goodput_measurement.src import checkpoint_badput_calculator
+from ml_goodput_measurement.src import checkpoint_badput_calculator
 import google.cloud.logging as google_cloud_logging
-import mock
+from unittest import mock
 
 
 _JOB_NAME = 'checkpoint_job'

@@ -1,13 +1,17 @@
 """Goodput Cache implementations."""
 
 import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, StepInfo
+from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 
+
+StepInfo = goodput_utils.StepInfo
+GoodputInfo = goodput_utils.GoodputInfo
 _TIME_ENTRY = 'time'
 _JOB_START_TIME = 'job_start_time'
 _JOB_END_TIME = 'job_end_time'
+
 
 class GoodputCache:
   """Goodput Cache."""
@@ -70,6 +74,10 @@ class GoodputCache:
   def update_goodput_info(self, goodput_info: GoodputInfo):
     """Updates the last computed Goodput information."""
     self._goodput_info = goodput_info
+
+  def get_goodput_info(self):
+    """Returns the last computed Goodput information."""
+    return self._goodput_info
 
   def clear_cache(self):
     """Clears the cache."""

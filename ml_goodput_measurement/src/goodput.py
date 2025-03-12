@@ -1,22 +1,36 @@
 """Goodput package API implementations.
 
-This file contains all the methods exposed through the cloud_goodput library
+This file contains all the methods exposed through the ml_goodput_measurement library
 for users to log necessary information to compute Goodput, and to query the
 computed Goodput.
 """
 
 import datetime
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
-from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointBadputCalculator
-from cloud_goodput.ml_goodput_measurement.src.checkpoint_badput_calculator import CheckpointLoggerOptions
-from cloud_goodput.ml_goodput_measurement.src.goodput_cache import GoodputCache
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo, StepInfo
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_extra_time_from_anomalous_steps, get_timestamp_from_log_entry
+from cloud_goodput.ml_goodput_measurement.src import checkpoint_badput_calculator
+from cloud_goodput.ml_goodput_measurement.src import goodput_cache
+from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 
 
-_JOB_NAME = 'job_name'
+get_timestamp_from_log_entry = goodput_utils.get_timestamp_from_log_entry
+get_extra_time_from_anomalous_steps = (
+    goodput_utils.get_extra_time_from_anomalous_steps
+)
+compute_ideal_step_time = goodput_utils.compute_ideal_step_time
+StepInfo = goodput_utils.StepInfo
+BadputType = goodput_utils.BadputType
+GoodputType = goodput_utils.GoodputType
+GoodputCache = goodput_cache.GoodputCache
+GoodputInfo = goodput_utils.GoodputInfo
+CheckpointLoggerOptions = checkpoint_badput_calculator.CheckpointLoggerOptions
+CheckpointBadputCalculator = (
+    checkpoint_badput_calculator.CheckpointBadputCalculator
+)
+_JOB_NAME = 'job_name'  
+_STEP_COUNT = 'step_count'
+_STEP_START_TIME = 'step_start_time'
 _STEP_COUNT = 'step_count'
 _STEP_START_TIME = 'step_start_time'
 _JOB_START_TIME = 'job_start_time'
@@ -29,6 +43,8 @@ _DATA_LOADING_START_TIME = 'data_loading_start_time'
 _DATA_LOADING_END_TIME = 'data_loading_end_time'
 
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
+
+logger = logging.getLogger(__name__)
 
 
 class _CloudLogger:
@@ -70,8 +86,8 @@ class _CloudLogger:
 
   def _get_filter_msg(
       self,
-      start_time: datetime.datetime | None,
-      end_time: datetime.datetime | None,
+      start_time: Optional[datetime.datetime],
+      end_time: Optional[datetime.datetime],
   ) -> str:
     """Gets the filter message for the Cloud Logging query."""
     filter_entries = [
@@ -114,6 +130,10 @@ class _CloudLogger:
   ):
     """Queries Cloud Logging entries for the specific job.
 
+    Args:
+      start_time: The start time of the query window.
+      end_time: The end time of the query window.
+
     Returns:
       Filtered entries in ascending order of timestamp.
     """
@@ -141,7 +161,7 @@ class GoodputRecorder:
       job_name: str,
       logger_name: str,
       logging_enabled=False,
-      logger: Optional[_CloudLogger] = None,
+      cloud_logger: Optional[_CloudLogger] = None,
   ):
     """GoodputRecorder constructor.
 
@@ -153,7 +173,7 @@ class GoodputRecorder:
         should send logs to Cloud Logging or not. The application should set
         this value to True if the Recorder is being called from TPU worker 0 and
         the application's configurations request Goodput logging.
-      logger: Should never be passed directly by the user.
+      cloud_logger: Should never be passed directly by the user.
     """
     self.job_name = job_name
     # If logging is disabled for this process, do not create a _cloud_logger
@@ -163,8 +183,8 @@ class GoodputRecorder:
       logging.info('Logging is disabled for this process.')
       return
 
-    if logger is not None:
-      self._cloud_logger = logger
+    if cloud_logger is not None:
+      self._cloud_logger = cloud_logger
     else:
       self._cloud_logger = _CloudLogger(job_name, logger_name)
 
@@ -369,7 +389,7 @@ class GoodputCalculator:
       self,
       job_name: str,
       logger_name: str,
-      logger: Optional[_CloudLogger] = None,
+      cloud_logger: Optional[_CloudLogger] = None,
       using_pathways: bool = False,
   ):
     """GoodputCalculator constructor.
@@ -377,13 +397,13 @@ class GoodputCalculator:
     Args:
       job_name: Name of the job the GoodputCalculator is for.
       logger_name: Name of the log being written.
-      logger: Should never be passed directly by the user.
+      cloud_logger: Should never be passed directly by the user.
       using_pathways: Whether or not the job uses Pathways.
     """
     self.job_name = job_name
     self.using_pathways = using_pathways
-    if logger is not None:
-      self._cloud_logger = logger
+    if cloud_logger is not None:
+      self._cloud_logger = cloud_logger
     else:
       self._cloud_logger = _CloudLogger(job_name, logger_name)
     self._current_entries = []
@@ -392,6 +412,7 @@ class GoodputCalculator:
     self._interval_start_time = None
     self._interval_end_time = None
     self._number_of_interruptions = 0
+    self._gcm_last_recorded_timestamp = None
 
   def _get_total_productive_and_unproductive_time(
       self,
@@ -412,9 +433,7 @@ class GoodputCalculator:
         self._get_current_productive_and_unproductive_time()
     )
     total_productive_time = cached_productive_time + current_productive_time
-    total_unproductive_time = (
-        cached_unproductive_time if cached_unproductive_time is not None else {}
-    )
+    total_unproductive_time = cached_unproductive_time
     for badput_type, unproductive_time in current_unproductive_time.items():
       if badput_type in cached_unproductive_time:
         total_unproductive_time[badput_type] = (
@@ -432,7 +451,7 @@ class GoodputCalculator:
 
   def _get_cached_productive_and_unproductive_time(
       self,
-  ) -> tuple[float, dict[BadputType, float] | None, int]:
+  ) -> tuple[float, dict[BadputType, float], int]:
     """Helper function to retrieve the cached productive training time and unproductive time."""
     goodput_info = self._goodput_cache._goodput_info
     if not self._goodput_cache.is_cache_empty() and goodput_info is not None:
@@ -447,6 +466,10 @@ class GoodputCalculator:
       self, interval_query: Optional[bool] = False
   ) -> tuple[float, dict[BadputType, float], int]:
     """Helper function to compute the current productive training time, unproductive time and the last step recorded till now.
+
+    Args:
+      interval_query: A boolean value to indicate whether the current query is
+        for an interval or not.
 
     Returns:
       A tuple of the productive training time, the unproductive time
@@ -655,18 +678,18 @@ class GoodputCalculator:
 
     # Compute unproductive time from checkpoint manager save and restore.
     checkpoint_logger_options = CheckpointLoggerOptions(use_goodput_logger=True)
-    checkpoint_badput_calculator = CheckpointBadputCalculator(
+    checkpoint_badput_calc = CheckpointBadputCalculator(
         checkpoint_logger_options
     )
-    checkpoint_badput_calculator.entries = entries_to_process
+    checkpoint_badput_calc.entries = entries_to_process
     checkpoint_manager_save_stats = (
-        checkpoint_badput_calculator.calculate_save_operation_checkpoint_manager_blocking_time()
+        checkpoint_badput_calc.calculate_save_operation_checkpoint_manager_blocking_time()
     )
     checkpoint_manager_save_badput = (
         checkpoint_manager_save_stats.total_checkpoint_manager_blocking_time
     )
     checkpoint_manager_restore_stats = (
-        checkpoint_badput_calculator.calculate_restore_operation_checkpoint_manager_blocking_time()
+        checkpoint_badput_calc.calculate_restore_operation_checkpoint_manager_blocking_time()
     )
     checkpoint_manager_restore_badput = (
         checkpoint_manager_restore_stats.total_checkpoint_manager_time
@@ -897,13 +920,12 @@ class GoodputCalculator:
     # Return a tuple of calculated Goodput & Badput of the job till now and the
     # last recorded step.
     job_goodput = (float(productive_training_time) / total_job_time) * 100
-    job_badput_breakdown = (
-        self._get_job_badput_breakdown(
-            productive_training_time, total_unproductive_time, total_job_time
-        )
-        if include_badput_breakdown
-        else {}
-    )
+    if include_badput_breakdown:
+      job_badput_breakdown = self._get_job_badput_breakdown(
+          productive_training_time, total_unproductive_time, total_job_time
+      )
+    else:
+      job_badput_breakdown = {}
 
     # Update the Goodput cache with new information.
     self._goodput_cache.update_cached_entries(self._current_entries)
@@ -913,6 +935,7 @@ class GoodputCalculator:
             total_elapsed_time_since_start=total_job_time,
             total_unproductive_time=total_unproductive_time,
             last_recorded_step=last_step,
+            last_updated_timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
     )
     return job_goodput, job_badput_breakdown, last_step
@@ -1077,6 +1100,7 @@ class GoodputCalculator:
           'Total job time is zero, Badput cannot be calculated. Please fix the'
           ' logging entries.'
       )
+
     # TPU initialization badput.
     tpu_init_badput = total_unproductive_time.get(
         BadputType.TPU_INITIALIZATION, 0.0
@@ -1160,3 +1184,58 @@ class GoodputCalculator:
     )
 
     return badput_breakdown
+
+  def get_job_goodput_details(
+      self,
+  ) -> dict[str, dict[Union[BadputType, GoodputType], float]]:
+    """Method to get the productive and non-productive time with breakdown of the job computed until now."""
+
+    goodput_info = self._goodput_cache.get_goodput_info()
+    if goodput_info is None:
+      logger.warning(
+          'Goodput information unavailable and will not be uploaded to GCM'
+      )
+      return {
+          'goodput_time_dict': {},
+          'badput_time_dict': {},
+      }
+
+    (
+        productive_training_time,
+        total_unproductive_time,
+        cache_last_updated_timestamp,  # This is the timestamp when the cache was updated.
+    ) = (
+        goodput_info.total_productive_time,
+        goodput_info.total_unproductive_time,
+        goodput_info.last_updated_timestamp,
+    )
+
+    if (
+        self._gcm_last_recorded_timestamp is not None  # Ignore the first entry.
+        and self._gcm_last_recorded_timestamp >= cache_last_updated_timestamp
+    ):
+      logger.warning(
+          'No new data, skipping upload to GCM. Cache Timestamp: %s, GCM'
+          ' Timestamp: %s', cache_last_updated_timestamp,
+          self._gcm_last_recorded_timestamp,
+      )
+      return {
+          'goodput_time_dict': {},
+          'badput_time_dict': {},
+      }
+
+    self._gcm_last_recorded_timestamp = datetime.datetime.now(
+        datetime.timezone.utc
+    )
+
+    # Currently productive_time is not split based on productive activities, it
+    # is just the total productive time. We will modify this to follow the same
+    # format as badput_breakdown. Please update this code accordingly in the
+    # future when we have more granular breakdown of productive time.
+
+    total_productive_time = {GoodputType.TOTAL: productive_training_time}
+
+    return {
+        'goodput_time_dict': total_productive_time,
+        'badput_time_dict': total_unproductive_time,
+    }

@@ -413,6 +413,8 @@ class GoodputCalculator:
     self._interval_end_time = None
     self._number_of_interruptions = 0
     self._gcm_last_recorded_timestamp = None
+    self._last_disruption_time = None
+    self._last_disrupted_step = None
 
   def _get_total_productive_and_unproductive_time(
       self,
@@ -505,6 +507,7 @@ class GoodputCalculator:
       steps_in_segment = 0
       min_step = min(list(step_start_data.keys()))
       step_times = []
+      wasted_progress_from_disruption = 0.0
       for step, start_time in step_start_data.items():
         if step <= curr_step and step - 1 in step_start_data:
           segment_productive_total_time += (
@@ -517,6 +520,10 @@ class GoodputCalculator:
             # from anomalous failures.
             step_times.append(start_time - step_start_data[step - 1])
           steps_in_segment += 1
+        elif step - 1 in step_start_data:
+          wasted_progress_from_disruption += (
+              start_time - step_start_data[step - 1]
+          )
 
       if steps_in_segment == 0:
         return (0.0, {})
@@ -535,16 +542,18 @@ class GoodputCalculator:
         first_step_extra_time = first_step_time - average_step_time
       extra_time_from_anomalous_steps = 0.0
       if self.using_pathways:
-        extra_time_from_anomalous_steps = get_extra_time_from_anomalous_steps(
-            step_times
-        )
+        # TODO(b/400837154): Fix get_extra_time_from_anomalous_steps.
+        extra_time_from_anomalous_steps = 0.0
       total_segment_productive_time = (
           segment_productive_total_time
           - first_step_extra_time
           - extra_time_from_anomalous_steps
       )
       total_segment_unproductive_time = {
-          BadputType.PROGRAM_STARTUP: first_step_extra_time
+          BadputType.PROGRAM_STARTUP: first_step_extra_time,
+          BadputType.WASTED_PROGRESS_FROM_DISRUPTION: (
+              wasted_progress_from_disruption
+          ),
       }
       return (
           total_segment_productive_time,
@@ -582,6 +591,7 @@ class GoodputCalculator:
     tpu_initialization_badput = 0.0
     training_prep_badput = 0.0
     data_loading_badput = 0.0
+    sync_data_loading = True
     entries_to_process = (
         self._interval_entries if interval_query else self._current_entries
     )
@@ -599,12 +609,23 @@ class GoodputCalculator:
           # all progress till Step (curr_step - 1) has been preserved. So we
           # can get the productive time since the previous start/restart and
           # then clear the step_start_data dict.
+          self._number_of_interruptions += 1
+          self._last_disrupted_step = list(step_start_data.keys())[-1]
+          self._last_disruption_time = step_start_data[
+              self._last_disrupted_step
+          ]
+          # Reset to True when the job restarts.
+          sync_data_loading = True
+
+          # Compute segment productive and unproductive time.
           segment_productive_time, segment_unproductive_time = (
               get_segment_productive_and_unproductive_time(
                   step_start_data, curr_step
               )
           )
+          # Accumulate the segment productive time.
           productive_training_time += segment_productive_time
+
           # Since the current step has been recorded again, the progress
           # between the previously recorded curr_step and recently recorded
           # curr_step has been lost to a disruption and partially recovered
@@ -620,14 +641,28 @@ class GoodputCalculator:
 
           # The first bucket can be calculated as the time between the start
           # time of curr_step and the job restart time immediately prior.
-          if job_start_time is not None:
-            wasted_progress_from_disruption = (
-                job_start_time - step_start_data[curr_step]
-            )
-            segment_unproductive_time[
+          if (
+              job_start_time is not None
+              and self._last_disruption_time is not None
+              and job_start_time > self._last_disruption_time
+          ):
+            # Add the additional time it took for the job to restart after last
+            # interruption. These conditions are only met when the job is
+            # restarted after a disruption.
+            # TODO(dishaw): This is the infrastructure disruption Badput and can
+            # go into a separate bucket.
+            disruption_badput = job_start_time - self._last_disruption_time
+            if (
                 BadputType.WASTED_PROGRESS_FROM_DISRUPTION
-            ] = wasted_progress_from_disruption
-            self._number_of_interruptions += 1
+                in segment_unproductive_time
+            ):
+              segment_unproductive_time[
+                  BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+              ] += disruption_badput
+            else:
+              segment_unproductive_time[
+                  BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+              ] = disruption_badput
 
           # The second bucket is individually computed either from recorded
           # logs (TPU initialization, training preparation, data loading) or
@@ -671,9 +706,15 @@ class GoodputCalculator:
           _DATA_LOADING_END_TIME in payload
           and data_loading_start_time is not None
       ):
-        data_loading_badput += (
-            payload[_DATA_LOADING_END_TIME] - data_loading_start_time
-        )
+        data_loading_end_time = payload[_DATA_LOADING_END_TIME]
+        data_loading_badput += data_loading_end_time - data_loading_start_time
+        if sync_data_loading:
+          # When the job starts or restarts, data loading is synchronous.
+          total_unproductive_time[BadputType.DATA_LOADING_SYNC] = (
+              total_unproductive_time.get(BadputType.DATA_LOADING_SYNC, 0)
+              + (data_loading_end_time - data_loading_start_time)
+          )
+          sync_data_loading = False
         data_loading_start_time = None
 
     # Compute unproductive time from checkpoint manager save and restore.
@@ -700,7 +741,17 @@ class GoodputCalculator:
         tpu_initialization_badput
     )
     total_unproductive_time[BadputType.TRAINING_PREP] = training_prep_badput
-    total_unproductive_time[BadputType.DATA_LOADING] = data_loading_badput
+
+    # Populate async data loading badput.
+    async_data_loading_badput = (
+        data_loading_badput
+        - total_unproductive_time.get(BadputType.DATA_LOADING_SYNC, 0)
+    )
+    total_unproductive_time[BadputType.DATA_LOADING_ASYNC] = (
+        async_data_loading_badput
+    )
+
+    # Populate checkpoint manager save and restore badput.
     total_unproductive_time[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME] = (
         checkpoint_manager_save_badput
     )
@@ -1121,13 +1172,25 @@ class GoodputCalculator:
         else 0.0
     )
 
-    # Data loading badput.
-    data_loading_badput = total_unproductive_time.get(
-        BadputType.DATA_LOADING, 0.0
+    # Only synchronous data loading is badput.
+    # Sync data loading is accumulated after start and reset of the job and is
+    # blocking.
+    sync_data_loading_badput = total_unproductive_time.get(
+        BadputType.DATA_LOADING_SYNC, 0.0
     )
-    badput_breakdown[BadputType.DATA_LOADING] = (
-        (data_loading_badput / total_job_time) * 100
-        if 0 < data_loading_badput < total_job_time
+    # Async data loading is accumulated overlapping with training and is
+    # non-blocking, therefore is not unproductive time.
+    async_data_loading_badput = total_unproductive_time.get(
+        BadputType.DATA_LOADING_ASYNC, 0.0
+    )
+    badput_breakdown[BadputType.DATA_LOADING_SYNC] = (
+        (sync_data_loading_badput / total_job_time) * 100
+        if 0 < sync_data_loading_badput < total_job_time
+        else 0.0
+    )
+    badput_breakdown[BadputType.DATA_LOADING_ASYNC] = (
+        (async_data_loading_badput / total_job_time) * 100
+        if 0 < async_data_loading_badput < total_job_time
         else 0.0
     )
 
@@ -1172,10 +1235,22 @@ class GoodputCalculator:
     )
 
     # Populate the 'Other/Unknown' badput bucket.
+    def _get_total_unproductive_time(
+        unproductive_time_dict: dict[BadputType, float],
+    ) -> float:
+      """Helper function to get the total unproductive time excluding the data loading async badput."""
+      total_unproductive_time = 0.0
+      for badput_type, unproductive_time in unproductive_time_dict.items():
+        # Async data loading is accumulated overlapping with training and is
+        # non-blocking, therefore is not unproductive time.
+        if badput_type != BadputType.DATA_LOADING_ASYNC:
+          total_unproductive_time += unproductive_time
+      return total_unproductive_time
+
     other_badput = (
         total_job_time
         - total_productive_time
-        - sum(total_unproductive_time.values())
+        - _get_total_unproductive_time(total_unproductive_time)
     )
     badput_breakdown[BadputType.OTHER] = (
         other_badput / total_job_time * 100

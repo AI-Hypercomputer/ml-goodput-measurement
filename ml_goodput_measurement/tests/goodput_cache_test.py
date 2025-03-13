@@ -33,7 +33,7 @@ class GoodputCacheTest(googletest.TestCase):
         total_unproductive_time={
             BadputType.TPU_INITIALIZATION: 10,
             BadputType.TRAINING_PREP: 10,
-            BadputType.DATA_LOADING: 30,
+            BadputType.DATA_LOADING_SYNC: 30,
             BadputType.PROGRAM_STARTUP: 10,
             BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME: 20,
             BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME: 10,
@@ -59,7 +59,7 @@ class GoodputCacheTest(googletest.TestCase):
             total_unproductive_time={
                 BadputType.TPU_INITIALIZATION: 10,
                 BadputType.TRAINING_PREP: 10,
-                BadputType.DATA_LOADING: 30,
+                BadputType.DATA_LOADING_SYNC: 30,
                 BadputType.PROGRAM_STARTUP: 10,
                 BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME: 20,
                 BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME: 10,

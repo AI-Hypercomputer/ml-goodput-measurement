@@ -260,7 +260,7 @@ class GoodputMonitorTests(absltest.TestCase):
             },
             'badput_time_dict': {
                 BadputType.TPU_INITIALIZATION: 2.0,
-                BadputType.DATA_LOADING: 1.0,
+                BadputType.DATA_LOADING_SYNC: 1.0,
             },
         }
     )
@@ -321,7 +321,7 @@ class GoodputMonitorTests(absltest.TestCase):
     )
     data_loading_ts = create_timeseries(
         'compute.googleapis.com/workload/badput_time',
-        {'badput_source': 'DATA_LOADING', 'accelerator_type': 'test-acc-type'},
+        {'badput_source': 'DATA_LOADING_SYNC', 'accelerator_type': 'test-acc-type'},
         1.0,
     )
 
@@ -392,7 +392,7 @@ class GoodputMonitorTests(absltest.TestCase):
                 GoodputType.TOTAL: 10.0,
             },
             'badput_time_dict': {
-                BadputType.DATA_LOADING: 2.0,
+                BadputType.DATA_LOADING_SYNC: 2.0,
             },
         }
     )

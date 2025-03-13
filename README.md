@@ -276,11 +276,12 @@ class BadputType(enum.Enum):
   TPU_INITIALIZATION = 1
   TRAINING_PREP = 2
   PROGRAM_STARTUP = 3
-  DATA_LOADING = 4
-  UNPRODUCTIVE_CHECKPOINT_SAVE_TIME = 5
-  UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME = 6
-  WASTED_PROGRESS_FROM_DISRUPTION = 7
-  OTHER = 8
+  DATA_LOADING_SYNC = 4
+  DATA_LOADING_ASYNC = 5
+  UNPRODUCTIVE_CHECKPOINT_SAVE_TIME = 6
+  UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME = 7
+  WASTED_PROGRESS_FROM_DISRUPTION = 8
+  OTHER = 9
 ```
 
 #### Badput Breakdown Details
@@ -301,11 +302,16 @@ class BadputType(enum.Enum):
   This is the time spent on framework specific function transformations
   (such as JAX tracing), compilation tasks, runtime initialization etc.
 
- - Data Loading Time (DATA_LOADING)
+ - Data Loading Time (DATA_LOADING_SYNC)
 
   This is the time spent on loading each batch of data for the training at a
   step to continue. This should be a small contribution to Badput if parallel
   data loading is used.
+
+  Async data loading is accumulated overlapping with training steps and is
+  non-blocking, therefore is not unproductive time. The time spent on overlapped
+  data loading is stored in BadputType.DATA_LOADING_ASYNC, but does **not**
+  affect overall Goodput of the workload.
 
  - Checkpointing Time (UNPRODUCTIVE_CHECKPOINT_SAVE_TIME, UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME)
 
@@ -348,7 +354,7 @@ print(f"Goodput: {goodput:.2f}%")
 print(f"Badput due to TPU initialization: {badput_breakdown[goodput.BadputType.TPU_INITIALIZATION]:.2f}%")
 print(f"Badput due to training preparation: {badput_breakdown[goodput.BadputType.TRAINING_PREP]:.2f}%")
 print(f"Badput due to program startup: {badput_breakdown[goodput.BadputType.PROGRAM_STARTUP]:.2f}%")
-print(f"Badput due to data loading: {badput_breakdown[goodput.BadputType.DATA_LOADING]:.2f}%")
+print(f"Badput due to data loading: {badput_breakdown[goodput.BadputType.DATA_LOADING_SYNC]:.2f}%")
 print(f"Badput due to disruption and wasted progress: {badput_breakdown[goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION]:.2f}%")
 ```
 

@@ -864,7 +864,7 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
-  def test_badput_calculator_data_loading(self):
+  def test_badput_calculator_sync_data_loading(self):
     """Test function to validate computation of badput due to data loading."""
 
     job_start_time = datetime.datetime.now(datetime.timezone.utc)
@@ -918,7 +918,7 @@ class BadputTest(googletest.TestCase):
     _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
         include_badput_breakdown=True
     )
-    expected_badput_due_to_data_loading = (
+    expected_badput_due_to_sync_data_loading = (
         (_TEST_DATA_LOADING_TIME.total_seconds())
         / total_time.total_seconds()
         * 100
@@ -928,9 +928,87 @@ class BadputTest(googletest.TestCase):
     self.assertIn(BadputType.DATA_LOADING_SYNC, computed_badput_breakdown)
     self.assertIn(BadputType.DATA_LOADING_ASYNC, computed_badput_breakdown)
     self.assertAlmostEqual(
-        computed_badput_breakdown[BadputType.DATA_LOADING_SYNC]
-        + computed_badput_breakdown[BadputType.DATA_LOADING_ASYNC],
-        expected_badput_due_to_data_loading,
+        computed_badput_breakdown[BadputType.DATA_LOADING_SYNC],
+        expected_badput_due_to_sync_data_loading,
+        delta=0.1,
+    )
+
+  def test_badput_calculator_async_data_loading(self):
+    """Test function to validate computation of badput due to data loading."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    # Mock training preparation.
+    self.goodput_recorder.record_training_preparation_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    self.goodput_recorder.record_training_preparation_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    # Mock syncdata loading.
+    self.goodput_recorder.record_data_loading_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    self.goodput_recorder.record_data_loading_end_time(
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    # Mock training.
+    step_start_time = (
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time.
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      # Record async (overlapped) data loading.
+      self.goodput_recorder.record_data_loading_start_time(
+        step_start_time + _TEST_STEP_TIME
+      )
+      self.goodput_recorder.record_data_loading_end_time(
+         step_start_time + _TEST_STEP_TIME
+          + _TEST_DATA_LOADING_TIME
+      )
+      step_start_time += (_TEST_STEP_TIME + _TEST_DATA_LOADING_TIME)
+
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + (_TEST_STEP_TIME + _TEST_DATA_LOADING_TIME) * _TEST_TOTAL_STEPS
+    )
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Badput with selection.
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+
+    # Every step has overloaded (async) data loading.
+    expected_badput_due_to_async_data_loading = (
+        ((_TEST_DATA_LOADING_TIME * _TEST_TOTAL_STEPS).total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(BadputType.DATA_LOADING_ASYNC, computed_badput_breakdown)
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.DATA_LOADING_ASYNC],
+        expected_badput_due_to_async_data_loading,
         delta=0.1,
     )
 

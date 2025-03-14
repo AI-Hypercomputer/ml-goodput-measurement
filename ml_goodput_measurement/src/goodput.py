@@ -592,6 +592,7 @@ class GoodputCalculator:
     training_prep_badput = 0.0
     data_loading_badput = 0.0
     sync_data_loading = True
+    current_sync_data_loading = None
     entries_to_process = (
         self._interval_entries if interval_query else self._current_entries
     )
@@ -614,8 +615,6 @@ class GoodputCalculator:
           self._last_disruption_time = step_start_data[
               self._last_disrupted_step
           ]
-          # Reset to True when the job restarts.
-          sync_data_loading = True
 
           # Compute segment productive and unproductive time.
           segment_productive_time, segment_unproductive_time = (
@@ -625,6 +624,15 @@ class GoodputCalculator:
           )
           # Accumulate the segment productive time.
           productive_training_time += segment_productive_time
+
+          # When the job restarts, data loading is synchronous.
+          sync_data_loading = True
+          if current_sync_data_loading is not None:
+            segment_unproductive_time[BadputType.DATA_LOADING_SYNC] = (
+                segment_unproductive_time.get(BadputType.DATA_LOADING_SYNC, 0)
+                + current_sync_data_loading
+            )
+            current_sync_data_loading = None
 
           # Since the current step has been recorded again, the progress
           # between the previously recorded curr_step and recently recorded
@@ -707,12 +715,13 @@ class GoodputCalculator:
           and data_loading_start_time is not None
       ):
         data_loading_end_time = payload[_DATA_LOADING_END_TIME]
-        data_loading_badput += data_loading_end_time - data_loading_start_time
+        current_sync_data_loading = data_loading_end_time - data_loading_start_time
+        data_loading_badput += current_sync_data_loading
         if sync_data_loading:
-          # When the job starts or restarts, data loading is synchronous.
+          # When the job starts, data loading is synchronous.
           total_unproductive_time[BadputType.DATA_LOADING_SYNC] = (
               total_unproductive_time.get(BadputType.DATA_LOADING_SYNC, 0)
-              + (data_loading_end_time - data_loading_start_time)
+              + current_sync_data_loading
           )
           sync_data_loading = False
         data_loading_start_time = None

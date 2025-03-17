@@ -14,11 +14,11 @@
 
 [project]
 name = "ml_goodput_measurement"
-version = "0.0.5"
+version = "0.0.6"
 authors = [
   { name="Cloud TPU Team", email="cloud-tpu-eng@google.com" },
 ]
-description = "Package to retrieve Goodput of jobs running on Cloud TPU."
+description = "Package to monitor Goodput, Badput and other metrics of ML workloads."
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "Apache-2.0"}

@@ -356,6 +356,9 @@ print(f"Badput due to training preparation: {badput_breakdown[goodput.BadputType
 print(f"Badput due to program startup: {badput_breakdown[goodput.BadputType.PROGRAM_STARTUP]:.2f}%")
 print(f"Badput due to data loading: {badput_breakdown[goodput.BadputType.DATA_LOADING_SYNC]:.2f}%")
 print(f"Badput due to disruption and wasted progress: {badput_breakdown[goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION]:.2f}%")
+print(f"Badput due to checkpoint save: {badput_breakdown[goodput.BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME]:.2f}%")
+print(f"Badput due to checkpoint restore: {badput_breakdown[goodput.BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME]:.2f}%")
+print(f"Badput from unknown source: {badput_breakdown[goodput.BadputType.OTHER]:.2f}%")
 ```
 
 #### Interval Query Goodput and Badput
@@ -389,7 +392,7 @@ In order to monitor the Goodput of a job run on Tensorboard, all you need to do
 is instantiate a `GoodputMonitor` object with the job's run name, cloud logger 
 name and Goodput monitoring configurations (as described below). Then call the 
 `start_goodput_uploader` API to asynchronously query and upload measured Goodput
-to the specified Tensorboard directory. 
+to the specified Tensorboard directory.
 
 
 #### Create a `GoodputMonitor` object
@@ -441,7 +444,8 @@ goodput_monitor = monitoring.GoodputMonitor(
     )
 ```
 
-If you want to monitor Step Time Deviation, configure the `GoodputMonitor` as follows:
+If you want to monitor Step Time Deviation, configure the `GoodputMonitor`
+as follows:
 
 ```python
 goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own logger name.
@@ -464,6 +468,9 @@ goodput_monitor = monitoring.GoodputMonitor(
 Call the `start_goodput_uploader` API to spin off a thread which continuously
 queries and uploads Goodput.
 
+Note: This will upload Goodput and Badput data to Google Cloud Monitoring
+by default.
+
 ```python
 goodput_monitor.start_goodput_uploader()
 ```
@@ -472,6 +479,9 @@ goodput_monitor.start_goodput_uploader()
 
 Call the `start_step_deviation_uploader` API to spin off a thread which
 continuously queries and uploads step time deviation.
+
+Note: This will upload Step Time Deviation data to Google Cloud Monitoring
+by default.
 
 ```python
 goodput_monitor.start_step_deviation_uploader()
@@ -484,10 +494,11 @@ goodput_monitor.start_step_deviation_uploader()
 
 #### Access Goodput, Badput and Step Deviation on Google Cloud Monitoring
 
-
 By default, performance data ([goodput](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/goodput_time), [badput](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/badput_time), and [step deviation](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/performance)) is automatically sent to Google Cloud Monitoring, enabling visualization on dashboards.
 
-This feature leverages Google VM metadata (project ID, location, accelerator type) and supports replica IDs for uniquely identifying workloads in multi-replica deployments.
+This feature leverages Google VM metadata (project ID, location, accelerator type)
+and supports replica IDs for uniquely identifying workloads in multi-replica
+deployments.
 
 ```python
 
@@ -513,9 +524,13 @@ goodput_monitor = monitoring.GoodputMonitor(
     )
 ```
 
-If you do not wish to send metrics to Google Cloud Monitoring then please set the flag `enable_gcp_goodput_metrics` to `False` for disabling goodput metrics and `enable_gcp_step_deviation_metrics` to `False` for disabling step deviation metrics while creating the GCPOptions object.
+If you do not wish to send metrics to Google Cloud Monitoring then please set
+the flag `enable_gcp_goodput_metrics` to `False` for disabling goodput metrics
+and `enable_gcp_step_deviation_metrics` to `False` for disabling step deviation
+metrics while creating the GCPOptions object.
 
-Setting `monitoring_enabled` to `False` will disable both tensorboard and GCP monitoring.
+Setting `monitoring_enabled` to `False` will disable both tensorboard and GCM
+monitoring.
 
 ```python
 

@@ -21,6 +21,13 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.0.6] - 2025-03-17
+
+* Updates to data loading Badput buckets (Separated into Async & Sync).
+* Short term fix to Pathways SuspendResume anomalous step time detection.
+* Updates to account for Pathways Elastic Training.
+* Automatic asynchronous upload of goodput, badput and step time deviation metrics to GCM.
+
 ## [0.0.5] - 2025-02-03
 
 * Goodput Cache and library improvements.
@@ -59,6 +66,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.0.6]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.2...v0.0.3

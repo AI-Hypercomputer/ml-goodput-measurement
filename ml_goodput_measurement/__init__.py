@@ -18,4 +18,3 @@ from ml_goodput_measurement.src import goodput
 from ml_goodput_measurement.src import goodput_cache
 from ml_goodput_measurement.src import goodput_utils
 from ml_goodput_measurement.src import monitoring
-from ml_goodput_measurement.src import gcp_metrics

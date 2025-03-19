@@ -20,6 +20,7 @@ GCPOptions = goodput_utils.GCPOptions
 ValueType = gcp_metrics.ValueType
 GoodputCalculator = goodput.GoodputCalculator
 GCPMetrics = gcp_metrics.GCPMetrics
+ACTIVITY_EXCLUSION_LIST = goodput_utils.ACTIVITY_EXCLUSION_LIST
 _TENSORBOARD_GCS_SUBDIR = 'goodput'
 _TENSORBOARD_GOODPUT_LABEL = 'goodput'
 _TENSORBOARD_BADPUT_LABEL = 'badput'
@@ -205,6 +206,8 @@ class GoodputMonitor:
       for goodput_type, time_value in goodput_details[
           'goodput_time_dict'
       ].items():
+        if goodput_type in ACTIVITY_EXCLUSION_LIST:
+          continue
         gcp_goodput_metrics.append({
             'metric_type': 'compute.googleapis.com/workload/goodput_time',
             'value': time_value,
@@ -223,6 +226,8 @@ class GoodputMonitor:
       for badput_type, time_value in goodput_details[
           'badput_time_dict'
       ].items():
+        if badput_type in ACTIVITY_EXCLUSION_LIST:
+          continue
         gcp_goodput_metrics.append({
             'metric_type': 'compute.googleapis.com/workload/badput_time',
             'value': time_value,

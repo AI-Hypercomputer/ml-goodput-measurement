@@ -977,6 +977,30 @@ class GoodputCalculator:
       raise ValueError(
           'Productive training time is invalid. Please fix the logging entries.'
       )
+
+    # Store the "Other" unproductive time.
+    def _get_total_unproductive_time(
+        unproductive_time_dict: dict[BadputType, float],
+    ) -> float:
+      """Helper function to get the total unproductive time excluding the data loading async badput."""
+      total_unproductive_time = 0.0
+      for badput_type, unproductive_time in unproductive_time_dict.items():
+        # Async data loading is accumulated overlapping with training and is
+        # non-blocking, therefore is not unproductive time.
+        if (
+            badput_type != BadputType.DATA_LOADING_ASYNC
+            and badput_type != BadputType.OTHER
+        ):
+          total_unproductive_time += unproductive_time
+      return total_unproductive_time
+
+    other_unproductive_time = (
+        total_job_time
+        - productive_training_time
+        - _get_total_unproductive_time(total_unproductive_time)
+    )
+    total_unproductive_time[BadputType.OTHER] = other_unproductive_time
+
     # Return a tuple of calculated Goodput & Badput of the job till now and the
     # last recorded step.
     job_goodput = (float(productive_training_time) / total_job_time) * 100
@@ -1244,25 +1268,9 @@ class GoodputCalculator:
     )
 
     # Populate the 'Other/Unknown' badput bucket.
-    def _get_total_unproductive_time(
-        unproductive_time_dict: dict[BadputType, float],
-    ) -> float:
-      """Helper function to get the total unproductive time excluding the data loading async badput."""
-      total_unproductive_time = 0.0
-      for badput_type, unproductive_time in unproductive_time_dict.items():
-        # Async data loading is accumulated overlapping with training and is
-        # non-blocking, therefore is not unproductive time.
-        if badput_type != BadputType.DATA_LOADING_ASYNC:
-          total_unproductive_time += unproductive_time
-      return total_unproductive_time
-
-    other_badput = (
-        total_job_time
-        - total_productive_time
-        - _get_total_unproductive_time(total_unproductive_time)
-    )
+    other_badput = total_unproductive_time.get(BadputType.OTHER, 0.0)
     badput_breakdown[BadputType.OTHER] = (
-        other_badput / total_job_time * 100
+        (other_badput / total_job_time) * 100
         if 0 < other_badput < total_job_time
         else 0.0
     )

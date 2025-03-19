@@ -1336,6 +1336,17 @@ class BadputTest(googletest.TestCase):
         expected_badput_due_to_unknown,
         delta=0.1,
     )
+    # Make sure this data is cached correctly.
+    cached_goodput_info = (
+        self.goodput_calculator._goodput_cache.get_goodput_info()
+    )
+    self.assertNotEmpty(cached_goodput_info.total_unproductive_time)
+    self.assertIn(BadputType.OTHER, cached_goodput_info.total_unproductive_time)
+    self.assertAlmostEqual(
+        cached_goodput_info.total_unproductive_time[BadputType.OTHER],
+        unknown_badput_time.total_seconds(),
+        delta=0.1,
+    )
 
   def test_badput_calculator_checkpoint_badput(self):
     """Validate computation of badput due to checkpoint manager time."""

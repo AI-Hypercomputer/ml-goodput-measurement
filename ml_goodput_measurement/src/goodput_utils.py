@@ -68,6 +68,12 @@ class BadputType(enum.Enum):
   WASTED_PROGRESS_FROM_DISRUPTION = 8
   OTHER = 9
 
+ACTIVITY_EXCLUSION_LIST = [
+    # DATA_LOADING_ASYNC is not a non-productive activity as it is not
+    # blocking. Hence, we exclude it from calculating Goodput.
+    BadputType.DATA_LOADING_ASYNC,
+]
+
 
 class GoodputInfo:
   """Goodput Information."""

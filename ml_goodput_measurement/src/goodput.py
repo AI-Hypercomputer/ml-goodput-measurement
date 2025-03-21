@@ -28,9 +28,7 @@ CheckpointLoggerOptions = checkpoint_badput_calculator.CheckpointLoggerOptions
 CheckpointBadputCalculator = (
     checkpoint_badput_calculator.CheckpointBadputCalculator
 )
-_JOB_NAME = 'job_name'  
-_STEP_COUNT = 'step_count'
-_STEP_START_TIME = 'step_start_time'
+_JOB_NAME = 'job_name'
 _STEP_COUNT = 'step_count'
 _STEP_START_TIME = 'step_start_time'
 _JOB_START_TIME = 'job_start_time'

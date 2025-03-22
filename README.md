@@ -556,3 +556,50 @@ goodput_monitor = monitoring.GoodputMonitor(
       gcp_options=gcp_options,
     )
 ```
+
+If you want to monitor Goodput and Badput metrics computed in a specific window
+of time, you can use the `start_goodput_interval_uploader` monitoring API.
+
+#### Create the `GoodputMonitor` with `enable_gcp_goodput_metrics` set to `True` in `GCPOptions`
+
+```python
+
+gcp_options = goodput_utils.GCPOptions(
+      project_id=None, # If None, the library will automatically identify from GCE internal metadata
+      location=None, # If None, the library will automatically identify from GCE internal metadata
+      replica_id='0', # Default is '0'
+      acc_type=None, # If None, the library will automatically identify from GCE internal metadata
+      enable_gcp_goodput_metrics=True,
+    )
+
+goodput_monitor = monitoring.GoodputMonitor(
+      job_name=config.run_name,
+      logger_name=logger_name,
+      tensorboard_dir=config.tensorboard_dir,
+      upload_interval=config.goodput_upload_interval_seconds,
+      monitoring_enabled=True,
+      include_badput_breakdown=True,
+      gcp_options=gcp_options
+    )
+```
+
+#### Start asynchronous "query and upload" of Interval Goodput to GCM.
+
+Call the `start_goodput_interval_uploader` API and specify `window_size_seconds`
+to compute Goodput and Badput metrics only in the sliding time window.
+The interval starts `window_size_seconds` prior to time of query, ends at time
+of query, and moves ahead by `upload_interval` seconds.
+
+This call is asynchronous and will only upload Goodput and Badput data to
+Google Cloud Monitoring, and not to Tensorboard.
+
+```python
+# Set the window size to be 12h
+goodput_monitor.start_goodput_interval_uploader(window_size_seconds = 43200)
+```
+
+Note: Google Cloud Monitoring will allow you to view all the metrics reported
+during the entire workload. GCM will also allow you to filter by any time window
+(irrespective of `window_size_seconds`). Each data point that is reported by
+this API will correspond to computation only within the sliding window of size
+`window_size_seconds`.

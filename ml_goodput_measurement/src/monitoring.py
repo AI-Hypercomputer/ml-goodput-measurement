@@ -4,6 +4,7 @@ This file contains all the utilities to monitor and upload goodput data of a
 user workload to Tensorboard asynchronously.
 """
 
+import datetime
 import logging
 import math
 import os
@@ -141,12 +142,19 @@ class GoodputMonitor:
             'Project ID or location is not set. GCP Monitoring will not be'
             ' enabled.'
         )
+      # Goodput interval uploader flags.
+      self._interval_uploader_thread_running = False
+      self._interval_goodput_upload_thread = None
+      self._interval_termination_event = threading.Event()
+      self._interval_termination_event.clear()
 
   def __del__(self):
     if self._uploader_thread_running:
       self.stop_goodput_uploader()
     if self._step_deviation_uploader_thread_running:
       self.stop_step_deviation_uploader()
+    if self._interval_uploader_thread_running:
+      self.stop_goodput_interval_uploader()
 
   def _write_goodput_data_to_tensorboard(
       self,
@@ -202,10 +210,9 @@ class GoodputMonitor:
           e,
       )
 
-  def _send_goodput_metrics_to_gcp(self):
+  def _send_goodput_metrics_to_gcp(self, goodput_details):
     """Sends goodput and badput metrics to GCP Monitoring."""
     try:
-      goodput_details = self._goodput_calculator.get_job_goodput_details()
       gcp_goodput_metrics = []
 
       for goodput_type, time_value in goodput_details[
@@ -263,7 +270,9 @@ class GoodputMonitor:
       time.sleep(self._upload_interval)
       self._query_and_upload_goodput_to_tensorboard()
       if self._gcp_options.enable_gcp_goodput_metrics:
-        self._send_goodput_metrics_to_gcp()
+        self._send_goodput_metrics_to_gcp(
+            self._goodput_calculator.get_job_goodput_details()
+        )
 
   def start_goodput_uploader(self):
     """Starts the goodput uploader thread."""
@@ -410,3 +419,58 @@ class GoodputMonitor:
         ' deviation data will be uploaded to Tensorboard or GCP Monitoring.'
     )
     self._step_deviation_uploader_thread_running = False
+
+  def _query_and_upload_interval_goodput(self, window_size_seconds: float):
+    """Queries and uploads goodput interval data to Tensorboard."""
+    while not self._interval_termination_event.is_set():
+      time.sleep(self._upload_interval)
+      if self._gcp_options.enable_gcp_goodput_metrics:
+        window_end = datetime.datetime.now(datetime.timezone.utc)
+        window_start = window_end - datetime.timedelta(
+            seconds=window_size_seconds
+        )
+        # Add timezone since deltatime removes it.
+        window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+        self._send_goodput_metrics_to_gcp(
+            self._goodput_calculator.get_job_goodput_interval_details(
+                window_start, window_end
+            )
+        )
+
+  def start_goodput_interval_uploader(self, window_size_seconds: float):
+    """Starts the goodput uploader thread for a user-specified interval window."""
+    if self._interval_uploader_thread_running:
+      raise RuntimeError('Goodput interval uploader thread is already running.')
+
+    self._interval_termination_event.clear()
+    self._interval_goodput_upload_thread = threading.Thread(
+        target=self._query_and_upload_interval_goodput,
+        args=(window_size_seconds,),
+        daemon=True,
+    )
+    logger.info(
+        'Starting goodput intervalquery and uploader thread in the background'
+        ' for job: %s and logger: %s',
+        self._job_name,
+        self._logger_name,
+    )
+    self._interval_goodput_upload_thread.start()
+    self._interval_uploader_thread_running = True
+
+  def stop_goodput_interval_uploader(self):
+    """Stops the goodput uploader thread."""
+    if not self._interval_uploader_thread_running:
+      raise RuntimeError('Goodput intervaluploader thread is not running.')
+
+    self._interval_termination_event.set()
+    if self._interval_goodput_upload_thread is not None:
+      logger.info(
+          'Waiting for goodput interval query and uploader thread to complete.'
+      )
+      self._interval_goodput_upload_thread.join()
+      self._interval_goodput_upload_thread = None
+    logger.info(
+        'Goodput interval query and uploader thread stopped. No more goodput'
+        ' intervaldata will be uploaded to GCP Monitoring.'
+    )
+    self._uploader_thread_running = False

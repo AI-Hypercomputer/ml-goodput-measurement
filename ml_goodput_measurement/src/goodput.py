@@ -1329,3 +1329,30 @@ class GoodputCalculator:
         'goodput_time_dict': total_productive_time,
         'badput_time_dict': total_unproductive_time,
     }
+
+  def get_job_goodput_interval_details(
+      self, interval_start: datetime.datetime, interval_end: datetime.datetime
+  ) -> dict[str, dict[Union[BadputType, GoodputType], float]]:
+    """Method to get the productive and non-productive time with breakdown of the job computed within an interval window."""
+    try:
+      goodput, badput_breakdown, _, total_job_time, _ = (
+          self.get_job_goodput_interval(interval_start, interval_end)
+      )
+      productive_time = goodput * total_job_time / 100
+      total_unproductive_time = {}
+      for badput_type, badput_value in badput_breakdown.items():
+        total_unproductive_time[badput_type] = (
+            badput_value * total_job_time / 100
+        )
+      total_productive_time = {GoodputType.TOTAL: productive_time}
+
+      return {
+          'goodput_time_dict': total_productive_time,
+          'badput_time_dict': total_unproductive_time,
+      }
+    except ValueError as e:
+      logger.warning('Failed to get job goodput interval details: %s', e)
+      return {
+          'goodput_time_dict': {},
+          'badput_time_dict': {},
+      }

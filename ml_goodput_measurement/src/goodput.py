@@ -199,7 +199,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if start_time is None:
-      start_time = datetime.datetime.utcnow()
+      start_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -234,7 +234,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if start_time is None:
-      start_time = datetime.datetime.utcnow()
+      start_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -251,7 +251,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if end_time is None:
-      end_time = datetime.datetime.utcnow()
+      end_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -273,7 +273,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if start_time is None:
-      start_time = datetime.datetime.utcnow()
+      start_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -291,7 +291,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if end_time is None:
-      end_time = datetime.datetime.utcnow()
+      end_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -313,7 +313,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if start_time is None:
-      start_time = datetime.datetime.utcnow()
+      start_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -331,7 +331,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if end_time is None:
-      end_time = datetime.datetime.utcnow()
+      end_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -349,7 +349,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if start_time is None:
-      start_time = datetime.datetime.utcnow()
+      start_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -367,7 +367,7 @@ class GoodputRecorder:
     if self._cloud_logger is None:
       return
     if end_time is None:
-      end_time = datetime.datetime.utcnow()
+      end_time = datetime.datetime.now(datetime.timezone.utc)
 
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
@@ -413,6 +413,7 @@ class GoodputCalculator:
     self._gcm_last_recorded_timestamp = None
     self._last_disruption_time = None
     self._last_disrupted_step = None
+    self._current_query_time = None
 
   def _get_total_productive_and_unproductive_time(
       self,
@@ -789,9 +790,11 @@ class GoodputCalculator:
           self._interval_end_time.timestamp() - step_start_data[last_step]
       )
     elif not interval_query:
-      productive_training_time += (
-          datetime.datetime.utcnow().timestamp() - step_start_data[last_step]
-      )
+      end_time = get_timestamp_from_log_entry(self._current_entries[-1])
+      if end_time and end_time.timestamp() >= step_start_data[last_step]:
+        productive_training_time += (
+            end_time.timestamp() - step_start_data[last_step]
+        )
 
     # Remove blocking checkpoint manager save time from productive time.
     productive_training_time -= checkpoint_manager_save_badput
@@ -802,36 +805,24 @@ class GoodputCalculator:
     return productive_training_time, total_unproductive_time, last_step
 
   def _get_total_job_time(self) -> float:
-    """Helper function to compute the total job runtime."""
-    return self._get_cached_total_job_time() + self._get_current_job_time()
-
-  def _get_cached_total_job_time(self) -> float:
-    """Helper function to retrieve cached total job runtime if available."""
-    if not self._goodput_cache.is_cache_empty():
-      goodput_info = self._goodput_cache._goodput_info
-      if goodput_info:
-        return goodput_info.total_elapsed_time_since_start
-    return 0.0
-
-  def _get_current_job_time(self) -> float:
     """Helper function to compute the current job runtime.
 
     Returns:
       The job's total runtime computed based on the last retrieved logs.
     """
-    # Find the last entry's timestamp as current window's start
-    # (present if entries are cached).
-    start_time = self._goodput_cache._last_entry_timestamp
+    # Find the job's original start time from the cache.
+    start_time = self._goodput_cache.get_job_start_time()
     if start_time:
-      end_time = self._goodput_cache._job_end_time
-      if end_time is not None:
-        return end_time.timestamp() - start_time.timestamp()
+      end_time = self._goodput_cache.get_job_end_time()
       # If the job's end time is missing then job has not yet completed, use
-      # current time to compute total job time.
-      return (
-          datetime.datetime.now(datetime.timezone.utc).timestamp()
-          - start_time.timestamp()
-      )
+      # current query time to compute total job time.
+      if end_time is None:
+        end_time = (
+            self._current_query_time
+            if self._current_query_time
+            else datetime.datetime.now(datetime.timezone.utc)
+        )
+      return end_time.timestamp() - start_time.timestamp()
 
     # De-serealize job start and end times from cloud logging entries. These
     # will be used to compute total runtime of the job.
@@ -849,19 +840,23 @@ class GoodputCalculator:
       if job_end_time is not None:
         return job_end_time - job_start_time
       # If the job's end time is missing then job has not yet completed, use
-      # current time to compute total job time.
-      return datetime.datetime.utcnow().timestamp() - job_start_time
+      # current query time to compute total job time.
+      job_end_time = (
+          self._current_query_time
+          if self._current_query_time
+          else datetime.datetime.now(datetime.timezone.utc)
+      )
+      return job_end_time.timestamp() - job_start_time
     # The the job's start time is missing so the total job time cannot be
     # calculated. Caller of this function should raise an error if this happens.
     return 0.0
 
   def _update_log_entries(self):
     """Helper function to update the log entries."""
-    current_query_time = datetime.datetime.now(datetime.timezone.utc)
     if not self._goodput_cache.is_cache_empty():
-      last_entry_timestamp = self._goodput_cache._last_entry_timestamp
+      last_entry_timestamp = self._goodput_cache.get_last_entry_timestamp()
       self._current_entries = self._cloud_logger.read_cloud_logging_entries(
-          last_entry_timestamp, current_query_time
+          last_entry_timestamp, self._current_query_time
       )
     else:
       self._current_entries = self._cloud_logger.read_cloud_logging_entries()
@@ -952,6 +947,8 @@ class GoodputCalculator:
       cannot be computed.
       ValueError if productive training time is invalid.
     """
+    # Update current query time.
+    self._current_query_time = datetime.datetime.now(datetime.timezone.utc)
 
     # Update the logs used to compute Goodput.
     self._update_log_entries()
@@ -1057,6 +1054,9 @@ class GoodputCalculator:
       ValueError if productive training or unproductive time is invalid.
     """
 
+    # Update current query time.
+    self._current_query_time = datetime.datetime.now(datetime.timezone.utc)
+
     # Get the logs for the interval and validate the interval window.
     self._get_interval_log_entries(interval_start, interval_end)
 
@@ -1124,6 +1124,9 @@ class GoodputCalculator:
     Returns:
       A dictionary of step deviation for each step.
     """
+    # Update current query time.
+    self._current_query_time = datetime.datetime.now(datetime.timezone.utc)
+
     # Get the log entries.
     self._update_log_entries()
     # Compute step times from the log entries.

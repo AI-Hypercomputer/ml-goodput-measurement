@@ -205,7 +205,7 @@ class GoodputTest(googletest.TestCase):
   def test_goodput_with_startup_badput(self):
     """Test function to validate goodput with startup badput."""
 
-    job_start_time = datetime.datetime.utcnow()
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_job_start_time(job_start_time)
 
     # Mock _TEST_TOTAL_STEPS steps of training
@@ -264,7 +264,7 @@ class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
     # testing this complex scenario using deterministic timestamps is not
     # straightforward.
     # TODO(xfgu): Refactor this test.
-    job_start_time = datetime.datetime.utcnow()
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_job_start_time(job_start_time)
 
     # Mock _TEST_TOTAL_STEPS steps of training
@@ -305,7 +305,6 @@ class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
     expected_goodput = (
         (
             (steps_before_query - 1) * _TEST_STEP_TIME.total_seconds()
-            + seconds_before_query
         )
         / query_time
         * 100
@@ -337,7 +336,7 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
     # testing this complex scenario using deterministic timestamps is not
     # straightforward.
     # TODO(xfgu): Refactor this test.
-    job_start_time = datetime.datetime.utcnow()
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_job_start_time(job_start_time)
 
     # Mock _TEST_TOTAL_STEPS steps of training
@@ -376,10 +375,7 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
     time.sleep(query_time)
     computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
-        (
-            _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
-            + seconds_before_query
-        )
+        ((_TEST_TOTAL_STEPS - 1) * _TEST_STEP_TIME.total_seconds())
         / query_time
         * 100
     )
@@ -389,7 +385,7 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
   def test_goodput_with_startup_badput(self):
     """Test function to validate goodput with startup badput."""
 
-    job_start_time = datetime.datetime.utcnow()
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_job_start_time(job_start_time)
 
     # Mock _TEST_TOTAL_STEPS steps of training
@@ -439,10 +435,7 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
     time.sleep(query_time)
     computed_goodput, _, _ = self.goodput_calculator.get_job_goodput()
     expected_goodput = (
-        (
-            _TEST_TOTAL_STEPS * _TEST_STEP_TIME.total_seconds()
-            + seconds_before_query
-        )
+        ((_TEST_TOTAL_STEPS - 1) * _TEST_STEP_TIME.total_seconds())
         / query_time
         * 100
     )
@@ -474,7 +467,7 @@ class GoodputPathwaysTest(googletest.TestCase):
     # [0, 1, 2, Handled Disruption, 3, 4]
     # The handled disruption will manifest as anomalously large step times.
 
-    job_start_time = datetime.datetime.utcnow()
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_job_start_time(job_start_time)
 
     # Mock some program startup time before the training steps
@@ -531,7 +524,7 @@ class GoodputPathwaysTest(googletest.TestCase):
     # [0, 1, 2, Handled Disruption, 3, 4, 5, 6, 7 Handled Disruption, 8, 9]
     # The handled disruptions will manifest as anomalously large step times.
 
-    job_start_time = datetime.datetime.utcnow()
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_job_start_time(job_start_time)
 
     # Mock some program startup time before the training steps
@@ -673,10 +666,10 @@ class BadputTest(googletest.TestCase):
   def test_training_prep_recorder_no_timestamps(self):
     """Test function to validate goodput recorder for training preparation with no timestamps."""
     # Record training preparation time.
-    expected_start_time = datetime.datetime.utcnow()
+    expected_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_training_preparation_start_time(None)
     time.sleep(_TEST_TRAINING_PREPARATION_TIME.total_seconds())
-    expected_end_time = datetime.datetime.utcnow()
+    expected_end_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_training_preparation_end_time(None)
 
     # Ensure read returns the right number of entries.
@@ -740,10 +733,10 @@ class BadputTest(googletest.TestCase):
   def test_data_loading_recorder_no_timestamps(self):
     """Test function to validate goodput recorder for data loading."""
     # Record data loading time.
-    expected_start_time = datetime.datetime.utcnow()
+    expected_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_data_loading_start_time(None)
     time.sleep(_TEST_DATA_LOADING_TIME.total_seconds())
-    expected_end_time = datetime.datetime.utcnow()
+    expected_end_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_data_loading_end_time(None)
 
     # Ensure read returns the right number of entries.
@@ -1700,7 +1693,7 @@ class BadputTest(googletest.TestCase):
 
   def test_get_step_deviation(self):
     """Test function to validate step deviation computation."""
-    job_start_time = datetime.datetime.utcnow()
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
     self.goodput_recorder.record_job_start_time(job_start_time)
     # Generate a list of 100 step start times with random step times.
     step_count = 0

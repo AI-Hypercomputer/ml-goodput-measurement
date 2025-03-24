@@ -64,12 +64,13 @@ class GoodputCache:
     """Updates the job end time."""
     # Overwrite the latest job end time if cached entries contain the job end
     # time.
-    if self._cached_entries:
-      for entry in self._cached_entries:
+    if self._job_end_time is None and self._cached_entries:
+      for entry in reversed(self._cached_entries):
         if _JOB_END_TIME in entry:
           self._job_end_time = datetime.datetime.fromtimestamp(
               entry[_JOB_END_TIME]
           )
+          break
 
   def update_goodput_info(self, goodput_info: GoodputInfo):
     """Updates the last computed Goodput information."""
@@ -78,6 +79,18 @@ class GoodputCache:
   def get_goodput_info(self):
     """Returns the last computed Goodput information."""
     return self._goodput_info
+
+  def get_job_start_time(self):
+    """Returns the job start time."""
+    return self._job_start_time
+
+  def get_job_end_time(self):
+    """Returns the job end time."""
+    return self._job_end_time
+
+  def get_last_entry_timestamp(self):
+    """Returns the timestamp of the last entry in the cache."""
+    return self._last_entry_timestamp
 
   def clear_cache(self):
     """Clears the cache."""

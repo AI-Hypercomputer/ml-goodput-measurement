@@ -21,6 +21,13 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.0.7] - 2025-03-24
+
+* Cache updates to Other/Unknown Badput.
+* Exclude monitoring asynchronous Badput types in GCM.
+* Total and last step updates with hidden events.
+* Interval Query Monitoring in GCM.
+
 ## [0.0.6] - 2025-03-17
 
 * Updates to data loading Badput buckets (Separated into Async & Sync).
@@ -66,6 +73,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.0.7]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.3...v0.0.4

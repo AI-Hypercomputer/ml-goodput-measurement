@@ -119,8 +119,10 @@ class StepInfo:
 
 def compute_ideal_step_time(
     step_times: list[float], previous_ideal_step_time: Optional[float]
-) -> float:
+) -> Optional[float]:
   """Helper function to compute the ideal step time."""
+  if not step_times:
+    return None
   # Filter out the normal step times from the step times dictionary.
   mad = stats.median_abs_deviation(step_times)
   med = np.median(step_times)

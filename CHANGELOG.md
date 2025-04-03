@@ -21,6 +21,10 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.0.8] - 2025-04-03
+
+* Fix computation of ideal step time when step_times is empty.
+
 ## [0.0.7] - 2025-03-24
 
 * Cache updates to Other/Unknown Badput.
@@ -73,6 +77,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.0.8]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.4...v0.0.5

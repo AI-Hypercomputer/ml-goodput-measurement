@@ -92,6 +92,10 @@ class GoodputCache:
     """Returns the timestamp of the last entry in the cache."""
     return self._last_entry_timestamp
 
+  def get_step_info(self):
+    """Returns the step information."""
+    return self._step_info
+
   def clear_cache(self):
     """Clears the cache."""
     self._cached_entries = []

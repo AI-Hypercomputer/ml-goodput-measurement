@@ -66,7 +66,9 @@ class BadputType(enum.Enum):
   UNPRODUCTIVE_CHECKPOINT_SAVE_TIME = 6
   UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME = 7
   WASTED_PROGRESS_FROM_DISRUPTION = 8
-  OTHER = 9
+  CUSTOM_BADPUT_EVENTS = 9
+  OTHER = 10
+
 
 
 ACTIVITY_EXCLUSION_LIST = [
@@ -122,15 +124,21 @@ def compute_ideal_step_time(
     step_times: list[float], previous_ideal_step_time: Optional[float]
 ) -> Optional[float]:
   """Helper function to compute the ideal step time."""
+  # Filter out step times that may be less than 1 second.
+  step_times = [step_time for step_time in step_times if step_time >= 1.0]
   if not step_times:
     return None
-  # Filter out the normal step times from the step times dictionary.
+  # Compute the median absolute deviation (MAD) and median of the step times
   mad = stats.median_abs_deviation(step_times)
   med = np.median(step_times)
-  normal_step_times = []
-  for step_time in step_times:
-    if step_time <= (med + mad * 3):
-      normal_step_times.append(step_time)
+
+  # Normalize the step times to the median + 3 * MAD.
+  normal_step_times = [
+      step_time for step_time in step_times if step_time <= (med + mad * 3)
+  ]
+  if not normal_step_times:
+    return None
+
   mean_normal_step_time = np.mean(normal_step_times)
   if previous_ideal_step_time is not None and not math.isnan(
       previous_ideal_step_time

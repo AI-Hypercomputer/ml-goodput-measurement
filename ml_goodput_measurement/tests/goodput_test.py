@@ -362,8 +362,8 @@ class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
       self.goodput_recorder.record_step_start_time(step, step_start_time)
       step_start_time += _TEST_STEP_TIME
 
-    # Simulate a 30-second disruption.
-    disruption_time = datetime.timedelta(seconds=30)
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
     job_start_time = step_start_time + disruption_time
     self.goodput_recorder.record_job_start_time(job_start_time)
     step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
@@ -434,8 +434,8 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
       self.goodput_recorder.record_step_start_time(step, step_start_time)
       step_start_time += _TEST_STEP_TIME
 
-    # Simulate a 30-second disruption.
-    disruption_time = datetime.timedelta(seconds=30)
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
     job_start_time = step_start_time + disruption_time
     self.goodput_recorder.record_job_start_time(job_start_time)
     step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
@@ -488,8 +488,8 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
       if step == 0:
         step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
 
-    # Simulate a 30-second disruption.
-    disruption_time = datetime.timedelta(seconds=30)
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
     job_start_time = step_start_time + disruption_time
     self.goodput_recorder.record_job_start_time(job_start_time)
     step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
@@ -1211,8 +1211,8 @@ class BadputTest(googletest.TestCase):
       if step == 0:
         step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
 
-    # Simulate a 30-second disruption.
-    disruption_time = datetime.timedelta(seconds=30)
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
     job_restart_time = step_start_time + disruption_time
     self.goodput_recorder.record_job_start_time(job_restart_time)
     step_start_time = (
@@ -1310,8 +1310,8 @@ class BadputTest(googletest.TestCase):
       if step == 0:
         step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
 
-    # Simulate a 30-second disruption.
-    disruption_time = datetime.timedelta(seconds=30)
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
     job_restart_time = step_start_time + disruption_time
     self.goodput_recorder.record_job_start_time(job_restart_time)
     step_start_time = (
@@ -1493,8 +1493,8 @@ class BadputTest(googletest.TestCase):
     )
     self.mock_cloud_logger.write_cloud_logging_entry(asdict(save_stats))
 
-    # Simulate a 30-second disruption.
-    disruption_time = datetime.timedelta(seconds=30)
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
     job_restart_time = step_start_time + disruption_time
     self.goodput_recorder.record_job_start_time(job_restart_time)
     step_start_time = (
@@ -1643,8 +1643,8 @@ class BadputTest(googletest.TestCase):
 
     intermediate_job_end_time = step_start_time
 
-    # Simulate a 30-second disruption.
-    disruption_time = datetime.timedelta(seconds=30)
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
     job_restart_time = step_start_time + disruption_time
     self.goodput_recorder.record_job_start_time(job_restart_time)
     step_start_time = (
@@ -1814,6 +1814,101 @@ class BadputTest(googletest.TestCase):
           computed_deviation,
           delta=0.1,
       )
+
+  def test_badput_calculator_custom_sync_badput(self):
+    """Test function to validate unknown badput bucket."""
+
+    job_start_time = _TEST_JOB_START_TIME
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+
+    # Mock _TEST_TOTAL_STEPS steps of training with built-in badput
+    # due to program startup.
+    step_start_time = (
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_PROGRAM_STARTUP_TIME
+    )
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time.
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    eval_sync_badput_time = datetime.timedelta(seconds=5)
+    self.goodput_recorder.record_custom_badput_event_start_time(
+        step_start_time, 'eval_step'
+    )
+    self.goodput_recorder.record_custom_badput_event_end_time(
+        step_start_time + eval_sync_badput_time, 'eval_step'
+    )
+    step_start_time += eval_sync_badput_time
+
+    # Continue training for _TEST_TOTAL_STEPS more steps.
+    for step in range(_TEST_TOTAL_STEPS, _TEST_TOTAL_STEPS * 2):
+      # Record step time.
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS * 2
+        + eval_sync_badput_time
+    )
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    computed_goodput, computed_badput_breakdown, _ = (
+        self.goodput_calculator.get_job_goodput(include_badput_breakdown=True)
+    )
+    # Validate Badput breakdown.
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        BadputType.CUSTOM_BADPUT_EVENTS, computed_badput_breakdown
+    )
+    self.assertIn(
+        'EVAL_STEP',
+        computed_badput_breakdown[BadputType.CUSTOM_BADPUT_EVENTS],
+    )
+    computed_badput_due_to_custom_sync = computed_badput_breakdown[
+        BadputType.CUSTOM_BADPUT_EVENTS
+    ]['EVAL_STEP']
+
+    expected_badput_due_to_custom_sync = (
+        (eval_sync_badput_time.total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+    self.assertAlmostEqual(
+        computed_badput_due_to_custom_sync,
+        expected_badput_due_to_custom_sync,
+        delta=0.1,
+    )
+    # Validate Goodput.
+    expected_goodput = (
+        (_TEST_STEP_TIME * (_TEST_TOTAL_STEPS * 2)).total_seconds()
+        / total_time.total_seconds()
+        * 100
+    )
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+    # Make sure this data is cached correctly.
+    cached_goodput_info = (
+        self.goodput_calculator._goodput_cache.get_goodput_info()
+    )
+    self.assertNotEmpty(cached_goodput_info.total_unproductive_time)
+    self.assertIn(
+        BadputType.CUSTOM_BADPUT_EVENTS,
+        cached_goodput_info.total_unproductive_time,
+    )
+    self.assertAlmostEqual(
+        cached_goodput_info.total_unproductive_time[
+            BadputType.CUSTOM_BADPUT_EVENTS
+        ]['EVAL_STEP'],
+        eval_sync_badput_time.total_seconds(),
+        delta=0.1,
+    )
 
 
 if __name__ == '__main__':

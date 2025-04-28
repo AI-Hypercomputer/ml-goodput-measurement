@@ -96,6 +96,14 @@ class GoodputCacheTest(googletest.TestCase):
         datetime.datetime.fromtimestamp(3),
     )
 
+  def test_get_step_info(self):
+    step_info = goodput_utils.StepInfo(
+        step_deviations={1: 1.0, 2: 2.0},
+        ideal_step_time=1.0,
+    )
+    self.goodput_cache.update_step_info(step_info)
+    self.assertEqual(self.goodput_cache._step_info, step_info)
+
   def test_update_job_start_time(self):
     self.assertIsNone(self.goodput_cache._job_start_time)
     self.goodput_cache.update_cached_entries([

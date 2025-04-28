@@ -1608,7 +1608,13 @@ class GoodputCalculator:
 
   def get_job_goodput_details(
       self,
-  ) -> dict[str, dict[Union[BadputType, GoodputType], float]]:
+  ) -> dict[
+      str,
+      dict[
+          Union[BadputType, GoodputType],
+          float | dict[str, float],
+      ],
+  ]:
     """Method to get the productive and non-productive time with breakdown of the job computed until now."""
 
     goodput_info = self._goodput_cache.get_goodput_info()
@@ -1663,7 +1669,13 @@ class GoodputCalculator:
 
   def get_job_goodput_interval_details(
       self, interval_start: datetime.datetime, interval_end: datetime.datetime
-  ) -> dict[str, dict[Union[BadputType, GoodputType], float]]:
+  ) -> dict[
+      str,
+      dict[
+          Union[BadputType, GoodputType],
+          float | dict[str, float],
+      ],
+  ]:
     """Method to get the productive and non-productive time with breakdown of the job computed within an interval window."""
     try:
       goodput, badput_breakdown, _, total_job_time, _ = (

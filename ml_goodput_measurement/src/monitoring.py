@@ -18,14 +18,17 @@ from tensorboardX import writer
 
 BadputType = goodput_utils.BadputType
 GCPOptions = goodput_utils.GCPOptions
-ValueType = gcp_metrics.ValueType
-GoodputCalculator = goodput.GoodputCalculator
 GCPMetrics = gcp_metrics.GCPMetrics
+GoodputCalculator = goodput.GoodputCalculator
+ValueType = gcp_metrics.ValueType
+
 ACTIVITY_EXCLUSION_LIST = goodput_utils.ACTIVITY_EXCLUSION_LIST
 _TENSORBOARD_GCS_SUBDIR = 'goodput'
 _TENSORBOARD_GOODPUT_LABEL = 'goodput'
 _TENSORBOARD_BADPUT_LABEL = 'badput'
 _TENSORBOARD_STEP_DEVIATION_LABEL = 'step_deviation'
+_GOODPUT_DETAILS_KEY = 'goodput_time_dict'
+_BADPUT_DETAILS_KEY = 'badput_time_dict'
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +159,32 @@ class GoodputMonitor:
     if self._interval_uploader_thread_running:
       self.stop_goodput_interval_uploader()
 
-  def _write_goodput_data_to_tensorboard(
+  def _log_tensorboard_scalars(
+      self,
+      label_prefix: str,
+      data: dict[str, float | dict[str, float]],
+      step: int,
+  ):
+    """Logs scalar values (flat or nested) to TensorBoard under a label prefix."""
+    if self._writer is None:
+      return
+
+    for data_type, data_value in data.items():
+      if isinstance(data_value, dict):
+        for subtype, subval in data_value.items():
+          full_label = f'{label_prefix}/{data_type}/{subtype}'.lower()
+          self._writer.add_scalar(
+              full_label, float(subval), step, display_name=subtype.lower()
+          )
+      else:
+        full_label = f'{label_prefix}/{data_type.lower()}'
+        self._writer.add_scalar(
+            full_label, float(data_value), step, display_name=data_type.lower()
+        )
+
+    self._writer.flush()
+
+  def _write_goodput_and_badput_data_to_tensorboard(
       self,
       job_goodput: float,
       badput_breakdown: dict[BadputType, float],
@@ -168,29 +196,33 @@ class GoodputMonitor:
       self._write_badput_to_tensorboard(badput_breakdown, last_step)
 
   def _write_goodput_to_tensorboard(self, job_goodput: float, last_step: int):
-    if self._writer is not None:
-      self._writer.add_scalar(
-          _TENSORBOARD_GOODPUT_LABEL, job_goodput, last_step
-      )
-      self._writer.flush()
+    self._log_tensorboard_scalars(
+        _TENSORBOARD_GOODPUT_LABEL,
+        {_TENSORBOARD_GOODPUT_LABEL: job_goodput},
+        last_step,
+    )
 
   def _write_badput_to_tensorboard(
-      self, job_badput_breakdown: dict[BadputType, float], last_step: int
+      self,
+      job_badput_breakdown: dict[BadputType, float | dict[str, float]],
+      last_step: int,
   ):
-    """Writes badput breakdown to Tensorboard."""
-    def _get_badput_label(badput_type: BadputType) -> str:
-      return str(badput_type.name).lower()
+    """Writes badput breakdown to TensorBoard."""
+    flattened_badput: dict[str, float | dict[str, float]] = {}
 
-    if self._writer is not None:
-      for badput_type, badput_percentage in job_badput_breakdown.items():
-        label_suffix = _get_badput_label(badput_type)
-        self._writer.add_scalar(
-            _TENSORBOARD_BADPUT_LABEL + '/' + label_suffix,
-            float(badput_percentage),
-            last_step,
-            display_name=label_suffix,
-        )
-      self._writer.flush()
+    for badput_type, badput_value in job_badput_breakdown.items():
+      if isinstance(badput_value, dict):
+        flattened_badput[badput_type.name.lower()] = {
+            subtype.lower(): value for subtype, value in badput_value.items()
+        }
+      else:
+        flattened_badput[badput_type.name.lower()] = badput_value
+
+    self._log_tensorboard_scalars(
+        _TENSORBOARD_BADPUT_LABEL,
+        flattened_badput,
+        last_step,
+    )
 
   def _query_and_upload_goodput_to_tensorboard(self):
     """Queries and uploads goodput data to Tensorboard."""
@@ -200,7 +232,7 @@ class GoodputMonitor:
               include_badput_breakdown=self._include_badput_breakdown
           )
       )
-      self._write_goodput_data_to_tensorboard(
+      self._write_goodput_and_badput_data_to_tensorboard(
           job_goodput, job_badput_breakdown, last_step
       )
     except Exception as e:  # pylint: disable=broad-exception-caught
@@ -210,15 +242,29 @@ class GoodputMonitor:
           e,
       )
 
+  def _flatten_badput_dict(
+      self,
+      badput_time_dict: dict[BadputType, float | dict[str, float]],
+  ) -> list[tuple[str, float]]:
+    """Flattens nested badput types into (label, value) pairs for export."""
+    flat_badput = []
+    for badput_type, val in badput_time_dict.items():
+      if isinstance(val, dict):
+        for subtype, subval in val.items():
+          flat_badput.append((f'{badput_type.name}.{subtype.upper()}', subval))
+      else:
+        flat_badput.append((badput_type.name, val))
+    return flat_badput
+
   def _send_goodput_metrics_to_gcp(self, goodput_details):
     """Sends goodput and badput metrics to GCP Monitoring."""
     try:
       gcp_goodput_metrics = []
 
       for goodput_type, time_value in goodput_details[
-          'goodput_time_dict'
+          _GOODPUT_DETAILS_KEY
       ].items():
-        if goodput_type in ACTIVITY_EXCLUSION_LIST:
+        if goodput_type.name in ACTIVITY_EXCLUSION_LIST:
           continue
         gcp_goodput_metrics.append({
             'metric_type': 'compute.googleapis.com/workload/goodput_time',
@@ -235,17 +281,17 @@ class GoodputMonitor:
                 'replica_id': self._gcp_options.replica_id,
             },
         })
-      for badput_type, time_value in goodput_details[
-          'badput_time_dict'
-      ].items():
-        if badput_type in ACTIVITY_EXCLUSION_LIST:
+      for badput_label, time_value in self._flatten_badput_dict(
+          goodput_details[_BADPUT_DETAILS_KEY]
+      ):
+        if badput_label in ACTIVITY_EXCLUSION_LIST:
           continue
         gcp_goodput_metrics.append({
             'metric_type': 'compute.googleapis.com/workload/badput_time',
             'value': time_value,
             'value_type': ValueType.DOUBLE,
             'metric_labels': {
-                'badput_source': badput_type.name,
+                'badput_source': badput_label,
                 'accelerator_type': self._gcp_options.acc_type,
             },
             'resource_type': 'compute.googleapis.com/Workload',

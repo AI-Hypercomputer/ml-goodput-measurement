@@ -13,15 +13,14 @@ from cloud_goodput.ml_goodput_measurement.src import monitoring
 
 from google.cloud import monitoring_v3
 
-
-GoodputMonitor = monitoring.GoodputMonitor
-patch = mock.patch
-MagicMock = mock.MagicMock
-GoodputType = goodput_utils.GoodputType
 BadputType = goodput_utils.BadputType
-ValueType = gcp_metrics.ValueType
 GCPOptions = goodput_utils.GCPOptions
+GoodputMonitor = monitoring.GoodputMonitor
+GoodputType = goodput_utils.GoodputType
+MagicMock = mock.MagicMock
+ValueType = gcp_metrics.ValueType
 
+patch = mock.patch
 _TEST_UPLOAD_INTERVAL = 1
 
 
@@ -33,6 +32,68 @@ class GoodputMonitorTests(absltest.TestCase):
     self.job_name = 'test-run'
     self.logger_name = 'test-logger'
     self.tensorboard_dir = 'test-dir'
+
+  def _create_timeseries(
+      self, metric_type: str, labels: dict, value: float
+  ) -> monitoring_v3.TimeSeries:
+    ts = monitoring_v3.TimeSeries()
+    ts.metric.type = metric_type
+    ts.metric.labels.update(labels)
+    ts.resource.type = 'compute.googleapis.com/Workload'
+    ts.resource.labels.update({
+        'location': 'test-location',
+        'workload_id': 'test-run',
+        'replica_id': 'test-replica-id',
+    })
+    ts.points.append(
+        monitoring_v3.Point(
+            value=monitoring_v3.TypedValue(double_value=value),
+        )
+    )
+    return ts
+
+  def _compare_calls_ignore_time_series(
+      self, expected_call, actual_call
+  ) -> bool:
+    if (
+        expected_call.args != actual_call.args
+        or expected_call.kwargs.keys() != actual_call.kwargs.keys()
+    ):
+      return False
+
+    for key, expected_value in expected_call.kwargs.items():
+      actual_value = actual_call.kwargs[key]
+      if key == 'time_series':
+        continue
+      if expected_value != actual_value:
+        return False
+
+    return True
+
+  def _setup_mock_goodput_monitor(
+      self, mock_logging_client, mock_summary_writer, mock_metric_service_client
+  ) -> GoodputMonitor:
+    mock_client = MagicMock()
+    mock_metric_service_client.return_value = mock_client
+    mock_logging_client.return_value = MagicMock()
+    mock_summary_writer.return_value = MagicMock()
+
+    gcp_options = GCPOptions(
+        enable_gcp_goodput_metrics=True,
+        project_id='test-project',
+        location='test-location',
+        acc_type='test-acc-type',
+        replica_id='test-replica-id',
+    )
+
+    return GoodputMonitor(
+        job_name='test-run',
+        logger_name='test-logger',
+        tensorboard_dir='/tmp',
+        upload_interval=1,
+        monitoring_enabled=True,
+        gcp_options=gcp_options,
+    )
 
   @patch('tensorboardX.writer.SummaryWriter')
   @patch('google.cloud.logging.Client')
@@ -269,77 +330,45 @@ class GoodputMonitorTests(absltest.TestCase):
         goodput_monitor._goodput_calculator.get_job_goodput_details()
     )
 
-    # Helper function to create TimeSeries
-    def create_timeseries(metric_type, labels, value):
-      ts = monitoring_v3.TimeSeries()
-      ts.metric.type = metric_type
-      ts.metric.labels.update(labels)
-      ts.resource.type = 'compute.googleapis.com/Workload'
-      ts.resource.labels.update({
-          'location': 'test-location',
-          'workload_id': 'test-run',
-          'replica_id': 'test-replica-id',
-      })
-      ts.points.append(
-          monitoring_v3.Point(
-              value=monitoring_v3.TypedValue(double_value=value),
-          )
-      )
-      return ts
-
-    # Helper function to compare calls. Ignore time series as they are
-    # dynamically generated.
-    def compare_calls_ignore_time_series(expected_call, actual_call):
-      if (
-          expected_call.args != actual_call.args
-          or expected_call.kwargs.keys() != actual_call.kwargs.keys()
-      ):
-        return False
-
-      for key, expected_value in expected_call.kwargs.items():
-        actual_value = actual_call.kwargs[key]
-        if key == 'time_series':
-          # Ignore the TimeSeries objects
-          continue
-        else:
-          if expected_value != actual_value:
-            return False
-
-      return True
-
-    # Create TimeSeries objects
-    goodput_ts = create_timeseries(
-        'compute.googleapis.com/workload/goodput_time',
-        {'goodput_source': 'TOTAL', 'accelerator_type': 'test-acc-type'},
-        10.0,
-    )
-    tpu_init_ts = create_timeseries(
-        'compute.googleapis.com/workload/badput_time',
-        {
-            'badput_source': 'TPU_INITIALIZATION',
-            'accelerator_type': 'test-acc-type',
-        },
-        2.0,
-    )
-    data_loading_ts = create_timeseries(
-        'compute.googleapis.com/workload/badput_time',
-        {'badput_source': 'DATA_LOADING_SYNC', 'accelerator_type': 'test-acc-type'},
-        1.0,
-    )
-
-    # Verify that create_time_series was called with the correct data
     expected_calls = [
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[goodput_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/goodput_time',
+                    {
+                        'goodput_source': 'TOTAL',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    10.0,
+                )
+            ],
         ),
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[tpu_init_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'TPU_INITIALIZATION',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2.0,
+                )
+            ],
         ),
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[data_loading_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
         ),
     ]
 
@@ -347,13 +376,13 @@ class GoodputMonitorTests(absltest.TestCase):
 
     # Verify each call individually
     for expected_call in expected_calls:
-      found = False
-      for actual_call in actual_calls:
-        if compare_calls_ignore_time_series(expected_call, actual_call):
-          found = True
-          break
-      if not found:
-        self.fail(f"Expected call not found: {expected_call}")
+      self.assertTrue(
+          any(
+              self._compare_calls_ignore_time_series(expected_call, actual)
+              for actual in actual_calls
+          ),
+          f'Expected call not found: {expected_call}',
+      )
 
   @patch('google.cloud.monitoring_v3.MetricServiceClient')
   @patch('tensorboardX.writer.SummaryWriter')
@@ -456,84 +485,47 @@ class GoodputMonitorTests(absltest.TestCase):
         goodput_monitor._goodput_calculator.get_job_goodput_details()
     )
 
-    # Helper function to create TimeSeries
-    def create_timeseries(metric_type, labels, value):
-      ts = monitoring_v3.TimeSeries()
-      ts.metric.type = metric_type
-      ts.metric.labels.update(labels)
-      ts.resource.type = 'compute.googleapis.com/Workload'
-      ts.resource.labels.update({
-          'location': 'test-location',
-          'workload_id': 'test-run',
-          'replica_id': 'test-replica-id',
-      })
-      ts.points.append(
-          monitoring_v3.Point(
-              value=monitoring_v3.TypedValue(double_value=value),
-          )
-      )
-      return ts
-
-    # Helper function to compare calls. Ignore time series as they are
-    # dynamically generated.
-    def compare_calls_ignore_time_series(expected_call, actual_call):
-      if (
-          expected_call.args != actual_call.args
-          or expected_call.kwargs.keys() != actual_call.kwargs.keys()
-      ):
-        return False
-
-      for key, expected_value in expected_call.kwargs.items():
-        actual_value = actual_call.kwargs[key]
-        if key == 'time_series':
-          # Ignore the TimeSeries objects
-          continue
-        else:
-          if expected_value != actual_value:
-            return False
-
-      return True
-
-    # Create TimeSeries objects, excluding the IDLE and DATA_LOADING_ASYNC types
-    goodput_ts = create_timeseries(
-        'compute.googleapis.com/workload/goodput_time',
-        {
-            'goodput_source': 'TOTAL',
-            'accelerator_type': 'test-acc-type'
-        },
-        10.0,
-    )
-    tpu_init_ts = create_timeseries(
-        'compute.googleapis.com/workload/badput_time',
-        {
-            'badput_source': 'TPU_INITIALIZATION',
-            'accelerator_type': 'test-acc-type',
-        },
-        2.0,
-    )
-    data_loading_ts = create_timeseries(
-        'compute.googleapis.com/workload/badput_time',
-        {
-            'badput_source': 'DATA_LOADING_SYNC',
-            'accelerator_type': 'test-acc-type',
-        },
-        1.0,
-    )
-
     # Verify that create_time_series was called with the correct data,
     # excluding DATA_LOADING_ASYNC
     expected_calls = [
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[goodput_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/goodput_time',
+                    {
+                        'goodput_source': 'TOTAL',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    10.0,
+                )
+            ],
         ),
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[tpu_init_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'TPU_INITIALIZATION',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2.0,
+                )
+            ],
         ),
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[data_loading_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
         ),
     ]
 
@@ -541,13 +533,21 @@ class GoodputMonitorTests(absltest.TestCase):
 
     # Verify each call individually
     for expected_call in expected_calls:
-      found = False
-      for actual_call in actual_calls:
-        if compare_calls_ignore_time_series(expected_call, actual_call):
-          found = True
-          break
-      if not found:
-        self.fail(f'Expected call not found: {expected_call}')
+      self.assertTrue(
+          any(
+              self._compare_calls_ignore_time_series(expected_call, actual)
+              for actual in actual_calls
+          ),
+          f'Expected call not found: {expected_call}',
+      )
+    # Verify unexpected calls are not made
+    for actual_call in actual_calls:
+      for ts in actual_call.kwargs.get('time_series', []):
+        if (
+            'badput_source' in ts.metric.labels
+            and ts.metric.labels['badput_source'] == 'DATA_LOADING_ASYNC'
+        ):
+          self.fail(f'Unexpected call found: {ts}')
 
   @patch('google.cloud.monitoring_v3.MetricServiceClient')
   @patch('tensorboardX.writer.SummaryWriter')
@@ -599,81 +599,45 @@ class GoodputMonitorTests(absltest.TestCase):
         goodput_monitor._goodput_calculator.get_job_goodput_interval_details()
     )
 
-    # TODO(dishaw): Refactor helper functions into a common test util file.
-    # Helper function to create TimeSeries
-    def create_timeseries(metric_type, labels, value):
-      ts = monitoring_v3.TimeSeries()
-      ts.metric.type = metric_type
-      ts.metric.labels.update(labels)
-      ts.resource.type = 'compute.googleapis.com/Workload'
-      ts.resource.labels.update({
-          'location': 'test-location',
-          'workload_id': 'test-run',
-          'replica_id': 'test-replica-id',
-      })
-      ts.points.append(
-          monitoring_v3.Point(
-              value=monitoring_v3.TypedValue(double_value=value),
-          )
-      )
-      return ts
-
-    # Helper function to compare calls. Ignore time series as they are
-    # dynamically generated.
-    def compare_calls_ignore_time_series(expected_call, actual_call):
-      if (
-          expected_call.args != actual_call.args
-          or expected_call.kwargs.keys() != actual_call.kwargs.keys()
-      ):
-        return False
-
-      for key, expected_value in expected_call.kwargs.items():
-        actual_value = actual_call.kwargs[key]
-        if key == 'time_series':
-          # Ignore the TimeSeries objects
-          continue
-        else:
-          if expected_value != actual_value:
-            return False
-
-      return True
-
-    # Create TimeSeries objects
-    goodput_ts = create_timeseries(
-        'compute.googleapis.com/workload/goodput_time',
-        {'goodput_source': 'TOTAL', 'accelerator_type': 'test-acc-type'},
-        10.0,
-    )
-    tpu_init_ts = create_timeseries(
-        'compute.googleapis.com/workload/badput_time',
-        {
-            'badput_source': 'TPU_INITIALIZATION',
-            'accelerator_type': 'test-acc-type',
-        },
-        2.0,
-    )
-    data_loading_ts = create_timeseries(
-        'compute.googleapis.com/workload/badput_time',
-        {
-            'badput_source': 'DATA_LOADING_SYNC',
-            'accelerator_type': 'test-acc-type',
-        },
-        1.0,
-    )
-
-    # Verify that create_time_series was called with the correct data
     expected_calls = [
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[goodput_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/goodput_time',
+                    {
+                        'goodput_source': 'TOTAL',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    10.0,
+                )
+            ],
         ),
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[tpu_init_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'TPU_INITIALIZATION',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2.0,
+                )
+            ],
         ),
         mock.call.create_time_series(
             name='projects/test-project',
-            time_series=[data_loading_ts],
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
         ),
     ]
 
@@ -681,13 +645,117 @@ class GoodputMonitorTests(absltest.TestCase):
 
     # Verify each call individually
     for expected_call in expected_calls:
-      found = False
-      for actual_call in actual_calls:
-        if compare_calls_ignore_time_series(expected_call, actual_call):
-          found = True
-          break
-      if not found:
-        self.fail(f"Expected call not found: {expected_call}")
+      self.assertTrue(
+          any(
+              self._compare_calls_ignore_time_series(expected_call, actual)
+              for actual in actual_calls
+          ),
+          f'Expected call not found: {expected_call}',
+      )
+
+  @patch('google.cloud.monitoring_v3.MetricServiceClient')
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_send_goodput_metrics_custom_sync_events(
+      self, mock_logging_client, mock_summary_writer, mock_metric_service_client
+  ):
+    mock_client = MagicMock()
+    mock_metric_service_client.return_value = mock_client
+    mock_logging_client.return_value = MagicMock()
+    mock_summary_writer.return_value = MagicMock()
+
+    gcp_options = GCPOptions(
+        enable_gcp_goodput_metrics=True,
+        project_id='test-project',
+        location='test-location',
+        acc_type='test-acc-type',
+        replica_id='test-replica-id',
+    )
+
+    goodput_monitor = GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        gcp_options=gcp_options,
+    )
+
+    # Mock the get_job_goodput_details to return test data, including an
+    # excluded type
+    goodput_monitor._goodput_calculator.get_job_goodput_details = MagicMock(
+        return_value={
+            'goodput_time_dict': {
+                GoodputType.TOTAL: 10.0,
+            },
+            'badput_time_dict': {
+                BadputType.TPU_INITIALIZATION: 2.0,
+                BadputType.DATA_LOADING_SYNC: 1.0,
+                BadputType.CUSTOM_BADPUT_EVENTS: {
+                    'EVAL_STEP': 3.0,
+                    'SDC_COMPILATION': 4.0,
+                },
+            },
+        }
+    )
+
+    goodput_monitor._send_goodput_metrics_to_gcp(
+        goodput_monitor._goodput_calculator.get_job_goodput_details()
+    )
+
+    expected_calls = [
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/goodput_time',
+                    {
+                        'goodput_source': 'TOTAL',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    10.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'TPU_INITIALIZATION',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/badput_time',
+                    {
+                        'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
+    ]
+
+    actual_calls = mock_client.create_time_series.call_args_list
+
+    # Verify each call individually
+    for expected_call in expected_calls:
+      self.assertTrue(
+          any(
+              self._compare_calls_ignore_time_series(expected_call, actual_call)
+              for actual_call in actual_calls
+          ),
+          f'Expected call not found: {expected_call}',
+      )
 
 
 if __name__ == '__main__':

@@ -30,6 +30,8 @@ _TEST_JOB_END_TIME = _TEST_STEP_START_TIME + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
 _TEST_FIRST_STEP_EXTRA_TIME = datetime.timedelta(seconds=5)
 # Anomalous large step times
 _TEST_ANOMALOUS_STEP_TIME = datetime.timedelta(seconds=30)
+# Custom badput event (overlapped with training) time
+_TEST_CUSTOM_BADPUT_TIME = datetime.timedelta(seconds=10)
 
 
 class MockCloudLogger:
@@ -153,6 +155,59 @@ class GoodputTest(googletest.TestCase):
     # Record job end time
     self.goodput_recorder.record_job_end_time(_TEST_JOB_END_TIME)
 
+  def _mock_sample_program_with_badput(self):
+    mock_current_time = _TEST_JOB_START_TIME
+    delay = datetime.timedelta(seconds=1)
+
+    # Record job start time of the job: use a fake timestamp
+    self.goodput_recorder.record_job_start_time(mock_current_time)
+
+    # Mock TPU initialization time
+    mock_current_time += delay
+    self.goodput_recorder.record_tpu_init_start_time(mock_current_time)
+    mock_current_time += _TEST_TPU_INIT_TIME
+    self.goodput_recorder.record_tpu_init_end_time(mock_current_time)
+
+    # Mock training preparation time
+    mock_current_time += delay
+    self.goodput_recorder.record_training_preparation_start_time(
+        mock_current_time
+    )
+    mock_current_time += _TEST_TRAINING_PREPARATION_TIME
+    self.goodput_recorder.record_training_preparation_end_time(
+        mock_current_time
+    )
+
+    # Mock data loading time
+    mock_current_time += delay
+    self.goodput_recorder.record_data_loading_start_time(mock_current_time)
+    mock_current_time += _TEST_DATA_LOADING_TIME
+    self.goodput_recorder.record_data_loading_end_time(mock_current_time)
+
+    # Mock _TEST_TOTAL_STEPS steps of training
+    mock_current_time += delay
+    custom_badput_event_frequency = 3
+    for step in range(_TEST_TOTAL_STEPS):
+      step_start_time = mock_current_time
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      # Record synchronous data loading time
+      self.goodput_recorder.record_data_loading_start_time(mock_current_time)
+      mock_current_time += _TEST_DATA_LOADING_TIME
+      self.goodput_recorder.record_data_loading_end_time(mock_current_time)
+      # Record custom badput event time
+      if step % custom_badput_event_frequency == 0:
+        self.goodput_recorder.record_custom_badput_event_start_time(
+            mock_current_time, 'test_sync'
+        )
+        mock_current_time += _TEST_CUSTOM_BADPUT_TIME
+        self.goodput_recorder.record_custom_badput_event_end_time(
+            mock_current_time, 'test_sync'
+        )
+      mock_current_time += _TEST_STEP_TIME
+    # Record job end time
+    self.goodput_recorder.record_job_end_time(mock_current_time)
+
   def test_goodput_recorder(self):
     """Test function to validate goodput recorder and logger."""
     # Emulate job run timeline.
@@ -186,6 +241,39 @@ class GoodputTest(googletest.TestCase):
             entry_payload[goodput._STEP_START_TIME],
             expected_start_start_time.timestamp(),
         )
+
+  def test_goodput_recorder_badput(self):
+    """Test function to validate goodput recorder and logger."""
+    # Emulate job run timeline.
+    self._mock_sample_program_with_badput()
+
+    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+
+    # Ensure payload contains the required information.
+    expected_keys = {
+        goodput._JOB_NAME,
+        goodput._STEP_COUNT,
+        goodput._STEP_START_TIME,
+        goodput._JOB_START_TIME,
+        goodput._JOB_END_TIME,
+        goodput._TPU_INIT_START_TIME,
+        goodput._TPU_INIT_END_TIME,
+        goodput._TRAINING_PREPARATION_START_TIME,
+        goodput._TRAINING_PREPARATION_END_TIME,
+        goodput._DATA_LOADING_START_TIME,
+        goodput._DATA_LOADING_END_TIME,
+        goodput._CUSTOM_BADPUT_EVENT_TYPE,
+        goodput._CUSTOM_BADPUT_EVENT_START_TIME,
+        goodput._CUSTOM_BADPUT_EVENT_END_TIME,
+    }
+    # Ensure right number of entries are written.
+    found_keys = set()
+    for entry_payload in validate_entries:
+      self.assertIn(goodput._JOB_NAME, entry_payload)
+      self.assertEqual(entry_payload[goodput._JOB_NAME], self.job_name)
+      found_keys.update(entry_payload.keys() & expected_keys)
+
+    self.assertEqual(found_keys, expected_keys)
 
   def test_goodput_calculator(self):
     """Test function to validate goodput calculator."""

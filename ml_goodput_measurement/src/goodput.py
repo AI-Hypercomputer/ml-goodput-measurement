@@ -39,6 +39,9 @@ _TRAINING_PREPARATION_START_TIME = 'training_prep_start_time'
 _TRAINING_PREPARATION_END_TIME = 'training_prep_end_time'
 _DATA_LOADING_START_TIME = 'data_loading_start_time'
 _DATA_LOADING_END_TIME = 'data_loading_end_time'
+_CUSTOM_BADPUT_EVENT_TYPE = 'custom_badput_event_type'
+_CUSTOM_BADPUT_EVENT_START_TIME = 'custom_badput_event_start_time'
+_CUSTOM_BADPUT_EVENT_END_TIME = 'custom_badput_event_end_time'
 
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
 
@@ -372,6 +375,57 @@ class GoodputRecorder:
     self._cloud_logger.write_cloud_logging_entry({
         _JOB_NAME: self.job_name,
         _DATA_LOADING_END_TIME: end_time.timestamp(),
+    })
+
+  def record_custom_badput_event_start_time(
+      self,
+      start_time: Optional[datetime.datetime] = None,
+      custom_badput_event_type: str = 'unknown',
+  ):
+    """Main recorder function to log the start time of a custom badput event.
+
+    Use this function to record the start time of a custom badput event that
+    occurs inside the training loop and utilizes the accelerator resources,
+    and blocks training.
+
+    For example, use this API to record the start time of the evaluation
+    loop or an SDC check if the the event blocks the training loop.
+
+    Args:
+      start_time: Start time of the custom badput event.
+      custom_badput_event_type: Type of the custom badput event.
+    """
+    if self._cloud_logger is None:
+      return
+    if start_time is None:
+      start_time = datetime.datetime.now(datetime.timezone.utc)
+
+    self._cloud_logger.write_cloud_logging_entry({
+        _JOB_NAME: self.job_name,
+        _CUSTOM_BADPUT_EVENT_TYPE: custom_badput_event_type,
+        _CUSTOM_BADPUT_EVENT_START_TIME: start_time.timestamp(),
+    })
+
+  def record_custom_badput_event_end_time(
+      self,
+      end_time: Optional[datetime.datetime] = None,
+      custom_badput_event_type: str = 'unknown',
+  ):
+    """Main recorder function to log the end time of a custom badput event.
+
+    Args:
+      end_time: End time of the custom badput event.
+      custom_badput_event_type: Type of the custom badput event.
+    """
+    if self._cloud_logger is None:
+      return
+    if end_time is None:
+      end_time = datetime.datetime.now(datetime.timezone.utc)
+
+    self._cloud_logger.write_cloud_logging_entry({
+        _JOB_NAME: self.job_name,
+        _CUSTOM_BADPUT_EVENT_TYPE: custom_badput_event_type,
+        _CUSTOM_BADPUT_EVENT_END_TIME: end_time.timestamp(),
     })
 
 
@@ -856,7 +910,7 @@ class GoodputCalculator:
     if not self._goodput_cache.is_cache_empty():
       last_entry_timestamp = self._goodput_cache.get_last_entry_timestamp()
       self._current_entries = self._cloud_logger.read_cloud_logging_entries(
-          last_entry_timestamp, self._current_query_time
+          last_entry_timestamp, self._current_query_time  # type: ignore
       )
     else:
       self._current_entries = self._cloud_logger.read_cloud_logging_entries()
@@ -870,7 +924,7 @@ class GoodputCalculator:
           'Start and end times are required to get log entries from an interval'
           ' window.'
       )
-    self._interval_entries = self._cloud_logger.read_cloud_logging_entries(
+    self._interval_entries = self._cloud_logger.read_cloud_logging_entries(  # type: ignore
         start_time, end_time
     )
     logging.info(

@@ -119,9 +119,7 @@ class StepInfo:
     self.step_deviations = step_deviations
 
 
-def compute_ideal_step_time(
-    step_times: list[float], previous_ideal_step_time: Optional[float]
-) -> Optional[float]:
+def compute_ideal_step_time(step_times: list[float]) -> Optional[float]:
   """Helper function to compute the ideal step time."""
   # Filter out step times that may be less than 1 second.
   step_times = [step_time for step_time in step_times if step_time >= 1.0]
@@ -135,15 +133,7 @@ def compute_ideal_step_time(
   normal_step_times = [
       step_time for step_time in step_times if step_time <= (med + mad * 3)
   ]
-  if not normal_step_times:
-    return None
-
-  mean_normal_step_time = np.mean(normal_step_times)
-  if previous_ideal_step_time is not None and not math.isnan(
-      previous_ideal_step_time
-  ):
-    return np.mean([mean_normal_step_time, previous_ideal_step_time])
-  return mean_normal_step_time
+  return np.mean(normal_step_times) if normal_step_times else None
 
 
 def get_anomalous_and_normal_step_times(

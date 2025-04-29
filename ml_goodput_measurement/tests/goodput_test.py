@@ -5,6 +5,7 @@ from dataclasses import asdict
 import datetime
 import random
 import time
+import threading
 from typing import Optional
 
 from cloud_goodput.ml_goodput_measurement.src import goodput
@@ -16,7 +17,14 @@ from google3.testing.pybase import googletest
 
 # Fake job timeline information for test purposes.
 _TEST_JOB_START_TIME = datetime.datetime(
-    year=2024, month=1, day=1, hour=1, minute=0, second=0, microsecond=0
+    year=2024,
+    month=1,
+    day=1,
+    hour=1,
+    minute=0,
+    second=0,
+    microsecond=0,
+    tzinfo=datetime.timezone.utc,
 )
 _TEST_PROGRAM_STARTUP_TIME = datetime.timedelta(seconds=5)
 _TEST_TPU_INIT_TIME = datetime.timedelta(seconds=1)
@@ -47,11 +55,21 @@ class MockCloudLogger:
       self.entries.append((timestamp, entry))
 
   def read_cloud_logging_entries(self, start_time=None, end_time=None):
+
+    def to_aware(dt):
+      return (
+          dt.replace(tzinfo=datetime.timezone.utc)
+          if dt is not None and dt.tzinfo is None
+          else dt
+      )
+
+    start_time = to_aware(start_time)
+    end_time = to_aware(end_time)
     return [
         entry
         for timestamp, entry in self.entries
-        if (start_time is None or timestamp >= start_time)
-        and (end_time is None or timestamp <= end_time)
+        if (start_time is None or to_aware(timestamp) > start_time)
+        and (end_time is None or to_aware(timestamp) <= end_time)
     ]
 
 
@@ -466,6 +484,18 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
         ((_TEST_TOTAL_STEPS - 1) * _TEST_STEP_TIME.total_seconds())
         / query_time
         * 100
+    )
+    # Validate that the cache is updated correctly.
+    cached_goodput_info = (
+        self.goodput_calculator._goodput_cache.get_goodput_info()
+    )
+    expected_productive_time = (
+        _TEST_TOTAL_STEPS - 1
+    ) * _TEST_STEP_TIME.total_seconds()
+    self.assertAlmostEqual(
+        cached_goodput_info.total_productive_time,
+        expected_productive_time,
+        delta=0.1,
     )
 
     self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
@@ -1687,7 +1717,7 @@ class BadputTest(googletest.TestCase):
         total_job_time,
         number_of_disruptions,
     ) = self.goodput_calculator.get_job_goodput_interval(
-        job_start_time, job_end_time
+        job_start_time - datetime.timedelta(microseconds=1), job_end_time
     )
 
     productive_time = _TEST_STEP_TIME * _TEST_TOTAL_STEPS
@@ -1732,7 +1762,7 @@ class BadputTest(googletest.TestCase):
         total_job_time,
         number_of_disruptions,
     ) = self.goodput_calculator.get_job_goodput_interval(
-        job_start_time, intermediate_job_end_time
+        job_start_time - datetime.timedelta(microseconds=1), intermediate_job_end_time
     )
 
     productive_time = _TEST_STEP_TIME * (_TEST_TOTAL_STEPS - 1)
@@ -1798,9 +1828,9 @@ class BadputTest(googletest.TestCase):
     job_end_time = test_step_start_times[-1] + datetime.timedelta(seconds=10)
     self.goodput_recorder.record_job_end_time(job_end_time)
 
-    step_times = self.goodput_calculator._get_step_times()
+    step_times = self.goodput_calculator._get_step_times(self.mock_cloud_logger.entries)
     ideal_step_time = compute_ideal_step_time(
-        step_times=list(step_times.values()), previous_ideal_step_time=None
+        step_times=list(step_times.values())
     )
     computed_step_deviations = self.goodput_calculator.get_step_deviation()
     expected_step_deviations = {
@@ -1910,6 +1940,163 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_goodput_with_disruption_and_caching(self):
+    """Test function to validate goodput with disruption and caching.
+
+    Verifies that productive time is correctly computed when a disruption is
+    detected after the last cache update, and previous cached data is stale.
+
+    Scenario:
+    - Initial productive steps (0-4) are cached before disruption.
+    - A disruption occurs and the job restarts from step 3.
+    - Delta between cached and new logs show steps 3-4 (latent disruption).
+    - Final computed and cached productive time should be correct at each query.
+    """
+    job_start_time = _TEST_JOB_START_TIME
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    step_start_time = job_start_time
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    disruption_time = datetime.timedelta(seconds=5)
+    job_start_time = step_start_time + disruption_time
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Query after restart but before any steps (emulate above scenario).
+    _, _, _ = self.goodput_calculator.get_job_goodput()
+    # Validate productive in the cache.
+    cached_goodput_info = (
+        self.goodput_calculator._goodput_cache.get_goodput_info()
+    )
+    self.assertAlmostEqual(
+        cached_goodput_info.total_productive_time,
+        (_TEST_STEP_TIME * (_TEST_TOTAL_STEPS - 1)).total_seconds(),
+        delta=0.1,
+    )
+
+    step_start_time = job_start_time
+    repeat_steps = 2
+    restart_step = _TEST_TOTAL_STEPS - repeat_steps
+    for step in range(restart_step, _TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    total_time = (
+        +_TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + disruption_time
+        + (restart_step - 1) * _TEST_STEP_TIME
+    )
+    self.goodput_recorder.record_job_end_time(_TEST_JOB_START_TIME + total_time)
+    # Compute Goodput and Badput.
+    _, _, _ = self.goodput_calculator.get_job_goodput()
+
+    # Validate that the cache is updated correctly.
+    cached_goodput_info = (
+        self.goodput_calculator._goodput_cache.get_goodput_info()
+    )
+    # Validate productive time,
+    expected_productive_time = _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+    self.assertAlmostEqual(
+        cached_goodput_info.total_productive_time,
+        expected_productive_time.total_seconds(),
+    )
+    # Validate that previous progress is now unproductive and marked as
+    # wasted progress).
+    self.assertNotEmpty(cached_goodput_info.total_unproductive_time)
+    self.assertIn(
+        BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
+        cached_goodput_info.total_unproductive_time,
+    )
+    expected_unproductive_time = (
+        total_time.total_seconds() - expected_productive_time.total_seconds()
+    )
+    cached_unproductive_time = sum(
+      value if isinstance(value, float) else sum(value.values())
+      for badput_type, value in cached_goodput_info.total_unproductive_time.items()
+      if badput_type != BadputType.DATA_LOADING_ASYNC
+    )
+
+    self.assertAlmostEqual(
+        cached_unproductive_time,
+        expected_unproductive_time,
+        delta=0.1,
+    )
+    expected_wasted_progress_from_disruption = (
+        disruption_time + (restart_step - 2) * _TEST_STEP_TIME
+    )
+    self.assertAlmostEqual(
+        cached_goodput_info.total_unproductive_time[
+            BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+        ],
+        expected_wasted_progress_from_disruption.total_seconds(),
+        delta=0.1,
+    )
+
+
+class GoodputStepDeviationConcurrencyTest(googletest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = 'test-concurrent-run'
+    self.logger_name = 'test-concurrent-log'
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput.GoodputRecorder(
+        self.job_name,
+        self.logger_name,
+        True,
+        self.mock_cloud_logger,
+    )
+    self.goodput_calculator = goodput.GoodputCalculator(
+        self.job_name, self.logger_name, self.mock_cloud_logger
+    )
+    self._mock_sample_program()
+
+  def _mock_sample_program(self):
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    step_time = _TEST_STEP_START_TIME
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_time)
+      step_time += _TEST_STEP_TIME
+    self.goodput_recorder.record_job_end_time(_TEST_JOB_END_TIME)
+
+  def test_concurrent_goodput_and_step_deviation(self):
+    """Test concurrent access to Goodput and Step Deviation calculations."""
+    errors = []
+
+    def compute_goodput():
+      try:
+        for _ in range(10):
+          self.goodput_calculator.get_job_goodput()
+      except (
+          ValueError,
+          TypeError,
+          KeyError,
+      ) as e:
+        errors.append(f'Goodput thread error: {e}')
+
+    def compute_step_deviation():
+      try:
+        for _ in range(10):
+          self.goodput_calculator.get_step_deviation()
+      except (
+          ValueError,
+          TypeError,
+      ) as e:
+        errors.append(f'Step deviation thread error: {e}')
+
+    threads = []
+    thread_count = 5
+    for _ in range(thread_count):
+      threads.append(threading.Thread(target=compute_goodput))
+      threads.append(threading.Thread(target=compute_step_deviation))
+
+    for t in threads:
+      t.start()
+    for t in threads:
+      t.join()
+    self.assertEmpty(errors, msg=f'Errors occurred in concurrent threads: {errors}')
 
 if __name__ == '__main__':
   googletest.main()

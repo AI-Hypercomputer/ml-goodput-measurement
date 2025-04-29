@@ -11,6 +11,7 @@ GoodputInfo = goodput_utils.GoodputInfo
 _TIME_ENTRY = 'time'
 _JOB_START_TIME = 'job_start_time'
 _JOB_END_TIME = 'job_end_time'
+_STEP_START_TIME = 'step_start_time'
 
 
 class GoodputCache:
@@ -18,6 +19,7 @@ class GoodputCache:
 
   def __init__(self):
     self._cached_entries = []
+    self._step_entries = []
     self._goodput_info = None
     self._last_entry_timestamp = None
     self._job_start_time = None
@@ -34,6 +36,8 @@ class GoodputCache:
     self.update_last_entry_timestamp()
     self.update_job_start_time()
     self.update_job_end_time()
+    new_step_entries = [entry for entry in entries if _STEP_START_TIME in entry]
+    self._step_entries.extend(new_step_entries)
 
   def update_last_entry_timestamp(self):
     """Helper function to store the timestamp of the last entry in the cache."""
@@ -46,7 +50,7 @@ class GoodputCache:
       ]
       if last_entry_posix_time:
         self._last_entry_timestamp = datetime.datetime.fromtimestamp(
-            last_entry_posix_time[0]
+            last_entry_posix_time[0], tz=datetime.timezone.utc
         )
 
   def update_job_start_time(self):
@@ -56,7 +60,7 @@ class GoodputCache:
       for entry in self._cached_entries:
         if _JOB_START_TIME in entry:
           self._job_start_time = datetime.datetime.fromtimestamp(
-              entry[_JOB_START_TIME]
+              entry[_JOB_START_TIME], tz=datetime.timezone.utc
           )
           break
 
@@ -68,13 +72,21 @@ class GoodputCache:
       for entry in reversed(self._cached_entries):
         if _JOB_END_TIME in entry:
           self._job_end_time = datetime.datetime.fromtimestamp(
-              entry[_JOB_END_TIME]
+              entry[_JOB_END_TIME], tz=datetime.timezone.utc
           )
           break
 
   def update_goodput_info(self, goodput_info: GoodputInfo):
     """Updates the last computed Goodput information."""
     self._goodput_info = goodput_info
+
+  def get_cached_entries(self):
+    """Returns the cached entries."""
+    return self._cached_entries
+
+  def get_step_entries(self):
+    """Returns the step entries."""
+    return self._step_entries
 
   def get_goodput_info(self):
     """Returns the last computed Goodput information."""

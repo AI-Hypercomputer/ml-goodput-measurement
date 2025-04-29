@@ -24,7 +24,7 @@ class GoodputCacheTest(googletest.TestCase):
     ]
     self.goodput_cache.update_cached_entries(mock_entries)
     self.assertFalse(self.goodput_cache.is_cache_empty())
-    self.assertEqual(self.goodput_cache._cached_entries, mock_entries)
+    self.assertEqual(self.goodput_cache.get_cached_entries(), mock_entries)
 
   def test_update_goodput_info(self):
     goodput_info = GoodputInfo(
@@ -70,7 +70,7 @@ class GoodputCacheTest(googletest.TestCase):
         )
     )
     self.goodput_cache.clear_cache()
-    self.assertEqual(self.goodput_cache._cached_entries, [])
+    self.assertEqual(self.goodput_cache.get_cached_entries(), [])
     self.assertIsNone(self.goodput_cache._goodput_info)
     self.assertIsNone(self.goodput_cache._last_entry_timestamp)
 
@@ -93,7 +93,7 @@ class GoodputCacheTest(googletest.TestCase):
     self.assertFalse(self.goodput_cache.is_cache_empty())
     self.assertEqual(
         self.goodput_cache._last_entry_timestamp,
-        datetime.datetime.fromtimestamp(3),
+        datetime.datetime.fromtimestamp(3, tz=datetime.timezone.utc),
     )
 
   def test_get_step_info(self):
@@ -121,7 +121,7 @@ class GoodputCacheTest(googletest.TestCase):
     ])
     self.assertEqual(
         self.goodput_cache._job_start_time,
-        datetime.datetime.fromtimestamp(1),
+        datetime.datetime.fromtimestamp(1, tz=datetime.timezone.utc),
     )
 
   def test_update_job_end_time(self):
@@ -133,7 +133,7 @@ class GoodputCacheTest(googletest.TestCase):
     ])
     self.assertEqual(
         self.goodput_cache._job_end_time,
-        datetime.datetime.fromtimestamp(3),
+        datetime.datetime.fromtimestamp(3, tz=datetime.timezone.utc),
     )
 
 

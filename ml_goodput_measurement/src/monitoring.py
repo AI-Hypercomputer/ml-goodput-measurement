@@ -105,7 +105,7 @@ class GoodputMonitor:
 
     # Goodput uploader flags to signal the daemon thread if it exists when to
     # initate shutdown and wait for termination.
-    self._uploader_thread_running = False
+    self._goodput_uploader_thread_running = False
     self._goodput_upload_thread = None
     self._termination_event = threading.Event()
     self._termination_event.clear()
@@ -150,14 +150,16 @@ class GoodputMonitor:
       self._interval_goodput_upload_thread = None
       self._interval_termination_event = threading.Event()
       self._interval_termination_event.clear()
+      self._interval_window_size_seconds = 0
 
   def __del__(self):
-    if self._uploader_thread_running:
-      self.stop_goodput_uploader()
-    if self._step_deviation_uploader_thread_running:
-      self.stop_step_deviation_uploader()
-    if self._interval_uploader_thread_running:
-      self.stop_goodput_interval_uploader()
+    try:
+      self.flush_and_stop_goodput_uploader()
+      self.flush_and_stop_step_deviation_uploader()
+      self.flush_and_stop_interval_goodput_uploader()
+
+    except Exception:  # pylint: disable=broad-exception-caught
+      pass
 
   def _log_tensorboard_scalars(
       self,
@@ -320,9 +322,52 @@ class GoodputMonitor:
             self._goodput_calculator.get_job_goodput_details()
         )
 
+  def _final_goodput_query_and_upload(self):
+    """Performs final goodput query and uploads data to Tensorboard & GCM."""
+    logger.info(
+        'Final goodput query and upload for job: %s and logger: %s',
+        self._job_name,
+        self._logger_name,
+    )
+    try:
+      job_goodput, job_badput_breakdown, last_step = (
+          self._goodput_calculator.get_job_goodput(
+              include_badput_breakdown=self._include_badput_breakdown
+          )
+      )
+      self._write_goodput_and_badput_data_to_tensorboard(
+          job_goodput, job_badput_breakdown, last_step
+      )
+      if self._gcp_options.enable_gcp_goodput_metrics:
+        self._send_goodput_metrics_to_gcp(
+            self._goodput_calculator.get_job_goodput_details()
+        )
+      logger.info(
+          'Final goodput query and upload for job: %s and logger: %s completed'
+          ' with total goodput: %.2f%%, last step: %d',
+          self._job_name,
+          self._logger_name,
+          job_goodput,
+          last_step,
+      )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.error(
+          'Error while performing final goodput query and upload for job: %s'
+          ' and logger: %s.  This will not impact the workload. Error: %s',
+          self._job_name,
+          self._logger_name,
+          e,
+      )
+
+  def flush_and_stop_goodput_uploader(self):
+    """Stops uploader and performs a final goodput upload."""
+    if self._goodput_uploader_thread_running:
+      self.stop_goodput_uploader()
+    self._final_goodput_query_and_upload()
+
   def start_goodput_uploader(self):
     """Starts the goodput uploader thread."""
-    if self._uploader_thread_running:
+    if self._goodput_uploader_thread_running:
       raise RuntimeError('Goodput uploader thread is already running.')
 
     self._termination_event.clear()
@@ -336,11 +381,11 @@ class GoodputMonitor:
         self._logger_name,
     )
     self._goodput_upload_thread.start()
-    self._uploader_thread_running = True
+    self._goodput_uploader_thread_running = True
 
   def stop_goodput_uploader(self):
     """Stops the goodput uploader thread."""
-    if not self._uploader_thread_running:
+    if not self._goodput_uploader_thread_running:
       raise RuntimeError('Goodput uploader thread is not running.')
 
     self._termination_event.set()
@@ -352,7 +397,7 @@ class GoodputMonitor:
         'Goodput query and uploader thread stopped. No more goodput data will'
         ' be uploaded to Tensorboard or GCP Monitoring.'
     )
-    self._uploader_thread_running = False
+    self._goodput_uploader_thread_running = False
 
   def _write_step_deviation_to_tensorboard(
       self, step_deviation: dict[int, float]
@@ -424,6 +469,42 @@ class GoodputMonitor:
       time.sleep(self._step_deviation_interval_seconds)
       self._query_and_upload_step_deviation_to_tensorboard_and_gcp()
 
+  def _final_step_deviation_query_and_upload(self):
+    """Performs final step deviation query and uploads data to Tensorboard & GCM."""
+    logger.info(
+        'Final step deviation query and upload for job: %s and logger: %s',
+        self._job_name,
+        self._logger_name,
+    )
+    try:
+      step_deviation = self._goodput_calculator.get_step_deviation(
+          self._configured_ideal_step_time
+      )
+      self._write_step_deviation_to_tensorboard(step_deviation)
+      if self._gcp_options.enable_gcp_step_deviation_metrics:
+        self._send_step_deviation_metric_to_gcp(step_deviation)
+      logger.info(
+          'Final step deviation query and upload for job: %s and logger: %s'
+          ' completed',
+          self._job_name,
+          self._logger_name,
+      )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.error(
+          'Error while performing final step deviation query and upload for'
+          ' job: %s and logger: %s. This will not impact the workload. Error:'
+          ' %s',
+          self._job_name,
+          self._logger_name,
+          e,
+      )
+
+  def flush_and_stop_step_deviation_uploader(self):
+    """Stops uploader and performs a final step deviation upload."""
+    if self._step_deviation_uploader_thread_running:
+      self.stop_step_deviation_uploader()
+    self._final_step_deviation_query_and_upload()
+
   def start_step_deviation_uploader(self):
     """Starts the step deviation uploader thread."""
     if not self._include_step_deviation:
@@ -466,14 +547,14 @@ class GoodputMonitor:
     )
     self._step_deviation_uploader_thread_running = False
 
-  def _query_and_upload_interval_goodput(self, window_size_seconds: float):
+  def _query_and_upload_interval_goodput(self):
     """Queries and uploads goodput interval data to Tensorboard."""
     while not self._interval_termination_event.is_set():
       time.sleep(self._upload_interval)
       if self._gcp_options.enable_gcp_goodput_metrics:
         window_end = datetime.datetime.now(datetime.timezone.utc)
         window_start = window_end - datetime.timedelta(
-            seconds=window_size_seconds
+            seconds=self._interval_window_size_seconds
         )
         # Add timezone since deltatime removes it.
         window_start = window_start.replace(tzinfo=datetime.timezone.utc)
@@ -483,19 +564,54 @@ class GoodputMonitor:
             )
         )
 
+  def _final_interval_goodput_query_and_upload(self):
+    """Performs final interval goodput query and uploads data to GCM."""
+    logger.info(
+        'Final interval goodput query and upload for job: %s and logger: %s',
+        self._job_name,
+        self._logger_name,
+    )
+    try:
+      window_end = datetime.datetime.now(datetime.timezone.utc)
+      window_start = window_end - datetime.timedelta(
+          seconds=self._interval_window_size_seconds
+      )
+      # Add timezone since deltatime removes it.
+      window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+      self._send_goodput_metrics_to_gcp(
+          self._goodput_calculator.get_job_goodput_interval_details(
+              window_start, window_end
+          )
+      )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.error(
+          'Error while performing final interval goodput query and upload for'
+          ' job: %s and logger: %s. This will not impact the workload. Error:'
+          ' %s',
+          self._job_name,
+          self._logger_name,
+          e,
+      )
+
+  def flush_and_stop_interval_goodput_uploader(self):
+    """Stops uploader and performs a final interval goodput upload."""
+    if self._interval_uploader_thread_running:
+      self.stop_goodput_interval_uploader()
+    self._final_interval_goodput_query_and_upload()
+
   def start_goodput_interval_uploader(self, window_size_seconds: float):
     """Starts the goodput uploader thread for a user-specified interval window."""
     if self._interval_uploader_thread_running:
       raise RuntimeError('Goodput interval uploader thread is already running.')
 
     self._interval_termination_event.clear()
+    self._interval_window_size_seconds = window_size_seconds
     self._interval_goodput_upload_thread = threading.Thread(
         target=self._query_and_upload_interval_goodput,
-        args=(window_size_seconds,),
         daemon=True,
     )
     logger.info(
-        'Starting goodput intervalquery and uploader thread in the background'
+        'Starting goodput interval query and uploader thread in the background'
         ' for job: %s and logger: %s',
         self._job_name,
         self._logger_name,
@@ -519,4 +635,4 @@ class GoodputMonitor:
         'Goodput interval query and uploader thread stopped. No more goodput'
         ' intervaldata will be uploaded to GCP Monitoring.'
     )
-    self._uploader_thread_running = False
+    self._interval_uploader_thread_running = False

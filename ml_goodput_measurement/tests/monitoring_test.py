@@ -118,7 +118,7 @@ class GoodputMonitorTests(absltest.TestCase):
     self.assertFalse(goodput_monitor._step_deviation_uploader_thread_running)
     self.assertIsNotNone(goodput_monitor._termination_event)
     self.assertFalse(goodput_monitor._termination_event.is_set())
-    self.assertFalse(goodput_monitor._uploader_thread_running)
+    self.assertFalse(goodput_monitor._goodput_uploader_thread_running)
 
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._write_goodput_to_tensorboard'
@@ -476,7 +476,9 @@ class GoodputMonitorTests(absltest.TestCase):
             'badput_time_dict': {
                 BadputType.TPU_INITIALIZATION: 2.0,
                 BadputType.DATA_LOADING_SYNC: 1.0,
-                BadputType.DATA_LOADING_ASYNC: 3.0,  # DATA_LOADING_ASYNC is in ACTIVITY_EXCLUSION_LIST
+                BadputType.DATA_LOADING_ASYNC: (
+                    3.0
+                ),  # DATA_LOADING_ASYNC is in ACTIVITY_EXCLUSION_LIST
             },
         }
     )
@@ -756,6 +758,36 @@ class GoodputMonitorTests(absltest.TestCase):
           ),
           f'Expected call not found: {expected_call}',
       )
+
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_interval_goodput_query_and_upload'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_step_deviation_query_and_upload'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'
+  )
+  async def test_goodput_monitor_final_query_and_upload(
+      self,
+      mock_final_goodput_query_and_upload,
+      mock_final_step_deviation_query_and_upload,
+      mock_final_interval_goodput_query_and_upload,
+  ):
+    mock_final_goodput_query_and_upload.return_value = MagicMock()
+    mock_final_step_deviation_query_and_upload.return_value = MagicMock()
+    mock_final_interval_goodput_query_and_upload.return_value = MagicMock()
+    goodput_monitor = monitoring.GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+    )
+    goodput_monitor.__del__()
+    mock_final_goodput_query_and_upload.assert_called_once()
+    mock_final_step_deviation_query_and_upload.assert_called_once()
+    mock_final_interval_goodput_query_and_upload.assert_called_once()
 
 
 if __name__ == '__main__':

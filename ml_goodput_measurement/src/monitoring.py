@@ -20,15 +20,15 @@ BadputType = goodput_utils.BadputType
 GCPOptions = goodput_utils.GCPOptions
 GCPMetrics = gcp_metrics.GCPMetrics
 GoodputCalculator = goodput.GoodputCalculator
+MetricType = goodput_utils.MetricType
 ValueType = gcp_metrics.ValueType
+WorkloadMetricDetails = goodput_utils.WorkloadMetricDetails
 
 ACTIVITY_EXCLUSION_LIST = goodput_utils.ACTIVITY_EXCLUSION_LIST
 _TENSORBOARD_GCS_SUBDIR = 'goodput'
 _TENSORBOARD_GOODPUT_LABEL = 'goodput'
 _TENSORBOARD_BADPUT_LABEL = 'badput'
 _TENSORBOARD_STEP_DEVIATION_LABEL = 'step_deviation'
-_GOODPUT_DETAILS_KEY = 'goodput_time_dict'
-_BADPUT_DETAILS_KEY = 'badput_time_dict'
 
 logger = logging.getLogger(__name__)
 
@@ -258,13 +258,13 @@ class GoodputMonitor:
         flat_badput.append((badput_type.name, val))
     return flat_badput
 
-  def _send_goodput_metrics_to_gcp(self, goodput_details):
+  def _send_goodput_metrics_to_gcp(self, goodput_details: WorkloadMetricDetails):
     """Sends goodput and badput metrics to GCP Monitoring."""
     try:
       gcp_goodput_metrics = []
 
       for goodput_type, time_value in goodput_details[
-          _GOODPUT_DETAILS_KEY
+          MetricType.GOODPUT_TIME.value
       ].items():
         if goodput_type.name in ACTIVITY_EXCLUSION_LIST:
           continue
@@ -284,7 +284,7 @@ class GoodputMonitor:
             },
         })
       for badput_label, time_value in self._flatten_badput_dict(
-          goodput_details[_BADPUT_DETAILS_KEY]
+          goodput_details[MetricType.BADPUT_TIME.value]
       ):
         if badput_label in ACTIVITY_EXCLUSION_LIST:
           continue

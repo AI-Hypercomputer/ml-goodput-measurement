@@ -1709,6 +1709,8 @@ class BadputTest(googletest.TestCase):
     job_end_time = job_start_time + total_time
     self.goodput_recorder.record_job_end_time(job_end_time)
 
+    # Timeline: [Job Start, TPU Init, Training Prep, Data Load, S0, S1, S2, S3, S4, Disruption, Job Restart, TPU Init, Training Prep, Data Load, S2, S3, S4, Job End]
+
     # Compute Goodput and Badput with the interval query API.
     (
         computed_goodput,
@@ -1734,7 +1736,7 @@ class BadputTest(googletest.TestCase):
         * 100
     )
 
-    # Validate last step
+    # Validate last productive step (S4).
     self.assertEqual(last_step, _TEST_TOTAL_STEPS - 1)
     # Validate total job time
     self.assertEqual(total_job_time, total_time.total_seconds())
@@ -1779,8 +1781,8 @@ class BadputTest(googletest.TestCase):
         * 100
     )
 
-    # Validate last step
-    self.assertEqual(last_step, _TEST_TOTAL_STEPS - 1)
+    # Validate last productive step (S3).
+    self.assertEqual(last_step, _TEST_TOTAL_STEPS - 2)
     # Validate total job time
     self.assertEqual(
         total_job_time, expected_intermediate_total_time.total_seconds()

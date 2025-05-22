@@ -18,6 +18,7 @@ GCPOptions = goodput_utils.GCPOptions
 GoodputMonitor = monitoring.GoodputMonitor
 GoodputType = goodput_utils.GoodputType
 MagicMock = mock.MagicMock
+MetricType = goodput_utils.MetricType
 ValueType = gcp_metrics.ValueType
 
 patch = mock.patch
@@ -316,10 +317,10 @@ class GoodputMonitorTests(absltest.TestCase):
     # Mock the get_job_goodput_details to return test data
     goodput_monitor._goodput_calculator.get_job_goodput_details = MagicMock(
         return_value={
-            'goodput_time_dict': {
+            MetricType.GOODPUT_TIME.value: {
                 GoodputType.TOTAL: 10.0,
             },
-            'badput_time_dict': {
+            MetricType.BADPUT_TIME.value: {
                 BadputType.TPU_INITIALIZATION: 2.0,
                 BadputType.DATA_LOADING_SYNC: 1.0,
             },
@@ -419,10 +420,10 @@ class GoodputMonitorTests(absltest.TestCase):
     # Mock the get_job_goodput_details to return test data
     goodput_monitor._goodput_calculator.get_job_goodput_details = MagicMock(
         return_value={
-            'goodput_time_dict': {
+            MetricType.GOODPUT_TIME.value: {
                 GoodputType.TOTAL: 10.0,
             },
-            'badput_time_dict': {
+            MetricType.BADPUT_TIME.value: {
                 BadputType.DATA_LOADING_SYNC: 2.0,
             },
         }
@@ -470,10 +471,10 @@ class GoodputMonitorTests(absltest.TestCase):
     # excluded type
     goodput_monitor._goodput_calculator.get_job_goodput_details = MagicMock(
         return_value={
-            'goodput_time_dict': {
+            MetricType.GOODPUT_TIME.value: {
                 GoodputType.TOTAL: 10.0,
             },
-            'badput_time_dict': {
+            MetricType.BADPUT_TIME.value: {
                 BadputType.TPU_INITIALIZATION: 2.0,
                 BadputType.DATA_LOADING_SYNC: 1.0,
                 BadputType.DATA_LOADING_ASYNC: (
@@ -586,10 +587,10 @@ class GoodputMonitorTests(absltest.TestCase):
     goodput_monitor._goodput_calculator.get_job_goodput_interval_details = (
         MagicMock(
             return_value={
-                'goodput_time_dict': {
+                MetricType.GOODPUT_TIME.value: {
                     GoodputType.TOTAL: 10.0,
                 },
-                'badput_time_dict': {
+                MetricType.BADPUT_TIME.value: {
                     BadputType.TPU_INITIALIZATION: 2.0,
                     BadputType.DATA_LOADING_SYNC: 1.0,
                 },
@@ -687,10 +688,10 @@ class GoodputMonitorTests(absltest.TestCase):
     # excluded type
     goodput_monitor._goodput_calculator.get_job_goodput_details = MagicMock(
         return_value={
-            'goodput_time_dict': {
+            MetricType.GOODPUT_TIME.value: {
                 GoodputType.TOTAL: 10.0,
             },
-            'badput_time_dict': {
+            MetricType.BADPUT_TIME.value: {
                 BadputType.TPU_INITIALIZATION: 2.0,
                 BadputType.DATA_LOADING_SYNC: 1.0,
                 BadputType.CUSTOM_BADPUT_EVENTS: {

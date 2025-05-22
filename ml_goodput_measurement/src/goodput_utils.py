@@ -5,7 +5,7 @@ import datetime
 import enum
 import logging
 import math
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 import numpy as np
 import requests
@@ -47,6 +47,14 @@ class GCPOptions:
   enable_gcp_step_deviation_metrics: bool = True
 
 
+# Metric type for upload and monitoring.
+class MetricType(enum.Enum):
+  """The type of Metric."""
+  GOODPUT_TIME = 'goodput_time'
+  BADPUT_TIME = 'badput_time'
+  MAX_PRODUCTIVE_STEP = 'max_productive_step'
+
+
 # Productive time is not broken down by activities yet. As such, we only have
 # one type of Goodput which contributes to the total productive time.
 class GoodputType(enum.Enum):
@@ -70,6 +78,11 @@ class BadputType(enum.Enum):
   OTHER = 10
 
 
+class WorkloadMetricDetails(TypedDict):
+  goodput_time: dict[GoodputType, float]
+  badput_time: dict[BadputType, float | dict[str, float]]
+  max_productive_step: int
+
 ACTIVITY_EXCLUSION_LIST = [
     # DATA_LOADING_ASYNC is not a non-productive activity as it is not
     # blocking. Hence, we exclude it from calculating Goodput.
@@ -85,6 +98,7 @@ class GoodputInfo:
       total_productive_time: float = 0.0,
       total_elapsed_time_since_start: float = 0.0,
       total_unproductive_time: Optional[dict[BadputType, float]] = None,
+      max_productive_step: int = 0,
       last_recorded_step: int = 0,
       last_updated_timestamp: datetime.datetime = datetime.datetime.now(
           datetime.timezone.utc
@@ -103,6 +117,7 @@ class GoodputInfo:
     self.total_unproductive_time = (
         total_unproductive_time or {}
     )
+    self.max_productive_step = max_productive_step
     self.last_recorded_step = last_recorded_step
     self.last_updated_timestamp = last_updated_timestamp
 

@@ -40,6 +40,7 @@ class GoodputCacheTest(googletest.TestCase):
             BadputType.WASTED_PROGRESS_FROM_DISRUPTION: 10,
             BadputType.OTHER: 10,
         },
+        max_productive_step=3,
         last_recorded_step=3,
     )
     self.goodput_cache.update_goodput_info(goodput_info)
@@ -66,6 +67,7 @@ class GoodputCacheTest(googletest.TestCase):
                 BadputType.WASTED_PROGRESS_FROM_DISRUPTION: 10,
                 BadputType.OTHER: 10,
             },
+            max_productive_step=3,
             last_recorded_step=3,
         )
     )

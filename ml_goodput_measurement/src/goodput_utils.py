@@ -53,6 +53,8 @@ class MetricType(enum.Enum):
   GOODPUT_TIME = 'goodput_time'
   BADPUT_TIME = 'badput_time'
   MAX_PRODUCTIVE_STEP = 'max_productive_step'
+  TOTAL_ELAPSED_TIME = 'total_elapsed_time'
+  DISRUPTION_COUNT = 'disruption_count'
 
 
 # Productive time is not broken down by activities yet. As such, we only have
@@ -82,6 +84,8 @@ class WorkloadMetricDetails(TypedDict):
   goodput_time: dict[GoodputType, float]
   badput_time: dict[BadputType, float | dict[str, float]]
   max_productive_step: int
+  total_elapsed_time: float
+  disruption_count: int
 
 ACTIVITY_EXCLUSION_LIST = [
     # DATA_LOADING_ASYNC is not a non-productive activity as it is not
@@ -96,16 +100,17 @@ class GoodputInfo:
   def __init__(
       self,
       total_productive_time: float = 0.0,
-      total_elapsed_time_since_start: float = 0.0,
+      total_elapsed_time: float = 0.0,
       total_unproductive_time: Optional[dict[BadputType, float]] = None,
       max_productive_step: int = 0,
       last_recorded_step: int = 0,
       last_updated_timestamp: datetime.datetime = datetime.datetime.now(
           datetime.timezone.utc
       ),
+      number_of_disruptions: int = 0,
   ):
     self.total_productive_time = total_productive_time
-    self.total_elapsed_time_since_start = total_elapsed_time_since_start
+    self.total_elapsed_time = total_elapsed_time
 
     # We cannot use {} as the default argument directly because it's a mutable
     # default argument.  Mutable default arguments are shared between all
@@ -120,6 +125,7 @@ class GoodputInfo:
     self.max_productive_step = max_productive_step
     self.last_recorded_step = last_recorded_step
     self.last_updated_timestamp = last_updated_timestamp
+    self.number_of_disruptions = number_of_disruptions
 
 
 class StepInfo:

@@ -29,7 +29,7 @@ class GoodputCacheTest(googletest.TestCase):
   def test_update_goodput_info(self):
     goodput_info = GoodputInfo(
         total_productive_time=100,
-        total_elapsed_time_since_start=200,
+        total_elapsed_time=200,
         total_unproductive_time={
             BadputType.TPU_INITIALIZATION: 10,
             BadputType.TRAINING_PREP: 10,
@@ -42,6 +42,7 @@ class GoodputCacheTest(googletest.TestCase):
         },
         max_productive_step=3,
         last_recorded_step=3,
+        number_of_disruptions=1,
     )
     self.goodput_cache.update_goodput_info(goodput_info)
     self.assertEqual(self.goodput_cache._goodput_info, goodput_info)
@@ -56,7 +57,7 @@ class GoodputCacheTest(googletest.TestCase):
     self.goodput_cache.update_goodput_info(
         GoodputInfo(
             total_productive_time=100,
-            total_elapsed_time_since_start=200,
+            total_elapsed_time=200,
             total_unproductive_time={
                 BadputType.TPU_INITIALIZATION: 10,
                 BadputType.TRAINING_PREP: 10,
@@ -69,6 +70,7 @@ class GoodputCacheTest(googletest.TestCase):
             },
             max_productive_step=3,
             last_recorded_step=3,
+            number_of_disruptions=1,
         )
     )
     self.goodput_cache.clear_cache()

@@ -1313,11 +1313,12 @@ class GoodputCalculator:
     self._goodput_cache.update_goodput_info(
         GoodputInfo(
             total_productive_time=productive_training_time,
-            total_elapsed_time_since_start=total_job_time,
+            total_elapsed_time=total_job_time,
             total_unproductive_time=total_unproductive_time,
             max_productive_step=max_productive_step,
             last_recorded_step=last_recorded_step,
             last_updated_timestamp=datetime.datetime.now(datetime.timezone.utc),
+            number_of_disruptions=self._number_of_interruptions,
         )
     )
     return job_goodput, job_badput_breakdown, max_productive_step
@@ -1643,6 +1644,8 @@ class GoodputCalculator:
           MetricType.GOODPUT_TIME.value: {},
           MetricType.BADPUT_TIME.value: {},
           MetricType.MAX_PRODUCTIVE_STEP.value: 0,
+          MetricType.TOTAL_ELAPSED_TIME.value: 0.0,
+          MetricType.DISRUPTION_COUNT.value: 0,
       }
 
     (
@@ -1650,11 +1653,15 @@ class GoodputCalculator:
         total_unproductive_time,
         cache_last_updated_timestamp,
         max_productive_step,
+        total_elapsed_time,
+        number_of_disruptions,
     ) = (
         goodput_info.total_productive_time,
         goodput_info.total_unproductive_time,
         goodput_info.last_updated_timestamp,
         goodput_info.max_productive_step,
+        goodput_info.total_elapsed_time,
+        goodput_info.number_of_disruptions,
     )
 
     if (
@@ -1683,6 +1690,8 @@ class GoodputCalculator:
         MetricType.GOODPUT_TIME.value: total_productive_time,
         MetricType.BADPUT_TIME.value: total_unproductive_time,
         MetricType.MAX_PRODUCTIVE_STEP.value: max_productive_step,
+        MetricType.TOTAL_ELAPSED_TIME.value: total_elapsed_time,
+        MetricType.DISRUPTION_COUNT.value: number_of_disruptions,
     }
 
   def get_job_goodput_interval_details(
@@ -1690,7 +1699,7 @@ class GoodputCalculator:
   ) -> WorkloadMetricDetails:
     """Method to get the productive and non-productive time with breakdown of the job computed within an interval window."""
     try:
-      goodput, badput_breakdown, max_productive_step, total_job_time, _ = (
+      goodput, badput_breakdown, max_productive_step, total_job_time, number_of_disruptions = (
           self.get_job_goodput_interval(interval_start, interval_end)
       )
       productive_time = goodput * total_job_time / 100
@@ -1705,6 +1714,8 @@ class GoodputCalculator:
           MetricType.GOODPUT_TIME.value: total_productive_time,
           MetricType.BADPUT_TIME.value: total_unproductive_time,
           MetricType.MAX_PRODUCTIVE_STEP.value: max_productive_step,
+          MetricType.TOTAL_ELAPSED_TIME.value: total_job_time,
+          MetricType.DISRUPTION_COUNT.value: number_of_disruptions,
       }
     except ValueError as e:
       logger.warning('Failed to get job goodput interval details: %s', e)
@@ -1712,4 +1723,6 @@ class GoodputCalculator:
           MetricType.GOODPUT_TIME.value: {},
           MetricType.BADPUT_TIME.value: {},
           MetricType.MAX_PRODUCTIVE_STEP.value: 0,
+          MetricType.TOTAL_ELAPSED_TIME.value: 0.0,
+          MetricType.DISRUPTION_COUNT.value: 0,
       }

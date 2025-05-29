@@ -1232,7 +1232,11 @@ class GoodputCalculator:
         - self._interval_start_time.timestamp()
     )
 
-  def get_job_goodput(self, include_badput_breakdown=False) -> tuple[
+  def get_job_goodput(
+      self,
+      include_badput_breakdown=False,
+      configured_ideal_step_time: Optional[float] = None,
+  ) -> tuple[
       float,
       UnproductiveTimeDict,
       int,
@@ -1253,6 +1257,8 @@ class GoodputCalculator:
     Args:
       include_badput_breakdown: Whether or not to return the badput breakdown.
         If False, returns {} for the badput breakdown.
+      configured_ideal_step_time: The configured ideal step time for the job. If
+        not set, the an ideal step time will be computed under the hood.
 
     Returns:
       A tuple of the job's Goodput, optionally the Badput breakdown and the last
@@ -1321,6 +1327,12 @@ class GoodputCalculator:
             number_of_disruptions=self._number_of_interruptions,
         )
     )
+
+    # Compute and store step information.
+    self._compute_step_info_and_update_cache(
+        new_entries, configured_ideal_step_time
+    )
+
     return job_goodput, job_badput_breakdown, max_productive_step
 
   def get_job_goodput_interval(
@@ -1432,22 +1444,12 @@ class GoodputCalculator:
   def _contains_step_entries(self, entries: list[Any]) -> bool:
     return any(_STEP_START_TIME in entry for entry in entries)
 
-  def get_step_deviation(
-      self, configured_ideal_step_time: Optional[float] = None
+  def _compute_step_info_and_update_cache(
+      self,
+      new_entries: list[Any],
+      configured_ideal_step_time: Optional[float] = None,
   ) -> dict[int, float]:
-    """Method to get the step deviation of the current step based on the ideal step time.
-
-    This method computes the ideal step time if one is not provided by the user
-    and returns the step deviation of the current step.
-
-    Args:
-      configured_ideal_step_time: Optional user-defined ideal step time.
-
-    Returns:
-      A dictionary of step deviation for each step.
-    """
-    query_time = datetime.datetime.now(datetime.timezone.utc)
-    new_entries = self._fetch_new_entries(query_time)
+    """Method to compute the step time deviation and update the cache."""
     with self._goodput_cache_lock:
       step_info = self._goodput_cache.get_step_info()
 
@@ -1493,6 +1495,26 @@ class GoodputCalculator:
           )
       )
     return step_deviations
+
+  def get_step_deviation(
+      self, configured_ideal_step_time: Optional[float] = None
+  ) -> dict[int, float]:
+    """Method to get the step deviation of the current step based on the ideal step time.
+
+    This method computes the ideal step time if one is not provided by the user
+    and returns the step deviation of the current step.
+
+    Args:
+      configured_ideal_step_time: Optional user-defined ideal step time.
+
+    Returns:
+      A dictionary of step deviation for each step.
+    """
+    query_time = datetime.datetime.now(datetime.timezone.utc)
+    new_entries = self._fetch_new_entries(query_time)
+    return self._compute_step_info_and_update_cache(
+        new_entries, configured_ideal_step_time
+    )
 
   def _get_job_badput_breakdown(
       self, total_unproductive_time, total_job_time
@@ -1646,6 +1668,7 @@ class GoodputCalculator:
           MetricType.MAX_PRODUCTIVE_STEP.value: 0,
           MetricType.TOTAL_ELAPSED_TIME.value: 0.0,
           MetricType.DISRUPTION_COUNT.value: 0,
+          MetricType.STEP_TIME_DEVIATION.value: {},
       }
 
     (
@@ -1678,6 +1701,14 @@ class GoodputCalculator:
     self._gcm_last_recorded_timestamp = datetime.datetime.now(
         datetime.timezone.utc
     )
+    # Fetch the step deviation from the cache.
+    with self._goodput_cache_lock:
+      step_info = self._goodput_cache.get_step_info()
+      step_time_deviation = (
+          step_info.step_deviations
+          if step_info and step_info.step_deviations
+          else {}
+      )
 
     # Currently productive_time is not split based on productive activities, it
     # is just the total productive time. We will modify this to follow the same
@@ -1692,6 +1723,7 @@ class GoodputCalculator:
         MetricType.MAX_PRODUCTIVE_STEP.value: max_productive_step,
         MetricType.TOTAL_ELAPSED_TIME.value: total_elapsed_time,
         MetricType.DISRUPTION_COUNT.value: number_of_disruptions,
+        MetricType.STEP_TIME_DEVIATION.value: step_time_deviation,
     }
 
   def get_job_goodput_interval_details(
@@ -1716,6 +1748,7 @@ class GoodputCalculator:
           MetricType.MAX_PRODUCTIVE_STEP.value: max_productive_step,
           MetricType.TOTAL_ELAPSED_TIME.value: total_job_time,
           MetricType.DISRUPTION_COUNT.value: number_of_disruptions,
+          MetricType.STEP_TIME_DEVIATION.value: {},
       }
     except ValueError as e:
       logger.warning('Failed to get job goodput interval details: %s', e)
@@ -1725,4 +1758,5 @@ class GoodputCalculator:
           MetricType.MAX_PRODUCTIVE_STEP.value: 0,
           MetricType.TOTAL_ELAPSED_TIME.value: 0.0,
           MetricType.DISRUPTION_COUNT.value: 0,
+          MetricType.STEP_TIME_DEVIATION.value: {},
       }

@@ -55,6 +55,7 @@ class MetricType(enum.Enum):
   MAX_PRODUCTIVE_STEP = 'max_productive_step'
   TOTAL_ELAPSED_TIME = 'total_elapsed_time'
   DISRUPTION_COUNT = 'disruption_count'
+  STEP_TIME_DEVIATION = 'step_time_deviation'
 
 
 # Productive time is not broken down by activities yet. As such, we only have
@@ -86,6 +87,7 @@ class WorkloadMetricDetails(TypedDict):
   max_productive_step: int
   total_elapsed_time: float
   disruption_count: int
+  step_time_deviation: dict[int, float]
 
 ACTIVITY_EXCLUSION_LIST = [
     # DATA_LOADING_ASYNC is not a non-productive activity as it is not

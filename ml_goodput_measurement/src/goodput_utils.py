@@ -4,7 +4,6 @@ import dataclasses
 import datetime
 import enum
 import logging
-import math
 from typing import Any, Optional, TypedDict
 
 import numpy as np
@@ -96,6 +95,18 @@ ACTIVITY_EXCLUSION_LIST = [
 ]
 
 
+class MonitoringWindowType(enum.Enum):
+  """The type of Monitoring Window."""
+
+  CUMULATIVE = 'cumulative'
+  INTERVAL = 'interval'
+
+
+_DEFAULT_RECENT_WINDOW_SIZE = 100
+_DEFAULT_BASELINE_WINDOW_SIZE = 1000
+_DEFAULT_SPIKE_PERCENTILE = 90
+
+
 class GoodputInfo:
   """Goodput Information."""
 
@@ -140,6 +151,75 @@ class StepInfo:
   ):
     self.ideal_step_time = ideal_step_time
     self.step_deviations = step_deviations
+
+
+def compute_percentile(values: list[float], percentile: float) -> float:
+  """Computes the specified percentile value from a list of floats."""
+  if not values:
+    return 0.0
+
+  sorted_values = sorted(values)
+  index = (len(sorted_values) - 1) * (percentile / 100.0)
+  lower_index = int(index)
+  upper_index = min(lower_index + 1, len(sorted_values) - 1)
+
+  return sorted_values[lower_index] + (
+      sorted_values[upper_index] - sorted_values[lower_index]
+  ) * (index - lower_index)
+
+
+def compute_step_deviation_from_baseline(
+    step_time_deviation: dict[int, float],
+    mode: MonitoringWindowType = MonitoringWindowType.CUMULATIVE,
+    recent_window_size: int = _DEFAULT_RECENT_WINDOW_SIZE,
+    baseline_window_size: int = _DEFAULT_BASELINE_WINDOW_SIZE,
+    spike_percentile: int = _DEFAULT_SPIKE_PERCENTILE,
+) -> float:
+  """Computes a spike-sensitive step time deviation metric.
+
+  Args:
+    step_time_deviation: Ordered dict (step count -> step deviation in seconds).
+    mode: 'cumulative' to compare against a historical baseline; 'interval' to
+      reflect short-term spikes only.
+    recent_window_size: Number of recent steps to consider for interval mode.
+    baseline_window_size: Number of older steps for cumulative baseline.
+    spike_percentile: Percentile to use for recent deviation sensitivity.
+
+  Returns:
+    The step deviation from the baseline.
+  """
+  if not step_time_deviation:
+    return 0.0
+
+  deviations = [abs(deviation) for deviation in step_time_deviation.values()]
+  total_steps = len(deviations)
+
+  if total_steps < _DEFAULT_RECENT_WINDOW_SIZE:
+    return np.mean(deviations)
+
+  if mode == MonitoringWindowType.INTERVAL:
+    recent_deviations = deviations[-recent_window_size:]
+    return compute_percentile(recent_deviations, spike_percentile)
+
+  elif mode == MonitoringWindowType.CUMULATIVE:
+    if total_steps < (recent_window_size + baseline_window_size):
+      recent_deviations = deviations[-recent_window_size:]
+      return compute_percentile(recent_deviations, spike_percentile)
+
+    recent_deviations = deviations[-recent_window_size:]
+    baseline_deviations = deviations[
+        -(recent_window_size + baseline_window_size) : -recent_window_size
+    ]
+
+    if not baseline_deviations:
+      return compute_percentile(recent_deviations, spike_percentile)
+
+    baseline_median = np.median(baseline_deviations)
+    spike_value = compute_percentile(recent_deviations, spike_percentile)
+    return spike_value - baseline_median
+
+  else:
+    raise ValueError('Unsupported MonitoringWindowType mode: {mode}')
 
 
 def compute_ideal_step_time(step_times: list[float]) -> Optional[float]:

@@ -1731,9 +1731,13 @@ class GoodputCalculator:
   ) -> WorkloadMetricDetails:
     """Method to get the productive and non-productive time with breakdown of the job computed within an interval window."""
     try:
-      goodput, badput_breakdown, max_productive_step, total_job_time, number_of_disruptions = (
-          self.get_job_goodput_interval(interval_start, interval_end)
-      )
+      (
+          goodput,
+          badput_breakdown,
+          max_productive_step,
+          total_job_time,
+          number_of_disruptions,
+      ) = self.get_job_goodput_interval(interval_start, interval_end)
       productive_time = goodput * total_job_time / 100
       total_unproductive_time = {}
       for badput_type, badput_value in badput_breakdown.items():

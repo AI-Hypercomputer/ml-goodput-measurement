@@ -324,10 +324,18 @@ class GoodputMonitorTests(absltest.TestCase):
                 BadputType.TPU_INITIALIZATION: 2.0,
                 BadputType.DATA_LOADING_SYNC: 1.0,
             },
+            MetricType.DISRUPTION_COUNT.value: 0,
+            MetricType.MAX_PRODUCTIVE_STEP.value: 2,
+            MetricType.TOTAL_ELAPSED_TIME.value: 20.0,
+            MetricType.STEP_TIME_DEVIATION.value: {
+                0: 1.0,
+                1: 1.0,
+                2: 1.0,
+            },
         }
     )
 
-    goodput_monitor._send_goodput_metrics_to_gcp(
+    goodput_monitor._upload_goodput_metrics_to_gcm(
         goodput_monitor._goodput_calculator.get_job_goodput_details()
     )
 
@@ -365,6 +373,56 @@ class GoodputMonitorTests(absltest.TestCase):
                     'compute.googleapis.com/workload/badput_time',
                     {
                         'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/disruptions',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/max_productive_steps',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/total_elapsed_time',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    20.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/step_time_deviation',
+                    {
                         'accelerator_type': 'test-acc-type',
                     },
                     1.0,
@@ -426,10 +484,18 @@ class GoodputMonitorTests(absltest.TestCase):
             MetricType.BADPUT_TIME.value: {
                 BadputType.DATA_LOADING_SYNC: 2.0,
             },
+            MetricType.DISRUPTION_COUNT.value: 0,
+            MetricType.MAX_PRODUCTIVE_STEP.value: 2,
+            MetricType.TOTAL_ELAPSED_TIME.value: 20.0,
+            MetricType.STEP_TIME_DEVIATION.value: {
+                0: 1.0,
+                1: 1.0,
+                2: 1.0,
+            },
         }
     )
 
-    goodput_monitor._send_goodput_metrics_to_gcp(
+    goodput_monitor._upload_goodput_metrics_to_gcm(
         goodput_monitor._goodput_calculator.get_job_goodput_details()
     )
 
@@ -481,10 +547,18 @@ class GoodputMonitorTests(absltest.TestCase):
                     3.0
                 ),  # DATA_LOADING_ASYNC is in ACTIVITY_EXCLUSION_LIST
             },
+            MetricType.DISRUPTION_COUNT.value: 0,
+            MetricType.MAX_PRODUCTIVE_STEP.value: 2,
+            MetricType.TOTAL_ELAPSED_TIME.value: 20.0,
+            MetricType.STEP_TIME_DEVIATION.value: {
+                0: 1.0,
+                1: 1.0,
+                2: 1.0,
+            },
         }
     )
 
-    goodput_monitor._send_goodput_metrics_to_gcp(
+    goodput_monitor._upload_goodput_metrics_to_gcm(
         goodput_monitor._goodput_calculator.get_job_goodput_details()
     )
 
@@ -524,6 +598,56 @@ class GoodputMonitorTests(absltest.TestCase):
                     'compute.googleapis.com/workload/badput_time',
                     {
                         'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/disruptions',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/max_productive_steps',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/total_elapsed_time',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    20.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/step_time_deviation',
+                    {
                         'accelerator_type': 'test-acc-type',
                     },
                     1.0,
@@ -594,11 +718,19 @@ class GoodputMonitorTests(absltest.TestCase):
                     BadputType.TPU_INITIALIZATION: 2.0,
                     BadputType.DATA_LOADING_SYNC: 1.0,
                 },
+                MetricType.DISRUPTION_COUNT.value: 0,
+                MetricType.MAX_PRODUCTIVE_STEP.value: 2,
+                MetricType.TOTAL_ELAPSED_TIME.value: 20.0,
+                MetricType.STEP_TIME_DEVIATION.value: {
+                    0: 1.0,
+                    1: 1.0,
+                    2: 1.0,
+                },
             }
         )
     )
 
-    goodput_monitor._send_goodput_metrics_to_gcp(
+    goodput_monitor._upload_goodput_metrics_to_gcm(
         goodput_monitor._goodput_calculator.get_job_goodput_interval_details()
     )
 
@@ -636,6 +768,56 @@ class GoodputMonitorTests(absltest.TestCase):
                     'compute.googleapis.com/workload/badput_time',
                     {
                         'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/disruptions',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/max_productive_steps',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/total_elapsed_time',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    20.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/step_time_deviation',
+                    {
                         'accelerator_type': 'test-acc-type',
                     },
                     1.0,
@@ -699,10 +881,18 @@ class GoodputMonitorTests(absltest.TestCase):
                     'SDC_COMPILATION': 4.0,
                 },
             },
+            MetricType.DISRUPTION_COUNT.value: 0,
+            MetricType.MAX_PRODUCTIVE_STEP.value: 2,
+            MetricType.TOTAL_ELAPSED_TIME.value: 20.0,
+            MetricType.STEP_TIME_DEVIATION.value: {
+                0: 1.0,
+                1: 1.0,
+                2: 1.0,
+            },
         }
     )
 
-    goodput_monitor._send_goodput_metrics_to_gcp(
+    goodput_monitor._upload_goodput_metrics_to_gcm(
         goodput_monitor._goodput_calculator.get_job_goodput_details()
     )
 
@@ -740,6 +930,56 @@ class GoodputMonitorTests(absltest.TestCase):
                     'compute.googleapis.com/workload/badput_time',
                     {
                         'badput_source': 'DATA_LOADING_SYNC',
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/disruptions',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/max_productive_steps',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    2,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/total_elapsed_time',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                    },
+                    20.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/step_time_deviation',
+                    {
                         'accelerator_type': 'test-acc-type',
                     },
                     1.0,

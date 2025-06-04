@@ -21,7 +21,9 @@ GCPOptions = goodput_utils.GCPOptions
 GCPMetrics = gcp_metrics.GCPMetrics
 GoodputCalculator = goodput.GoodputCalculator
 MetricType = goodput_utils.MetricType
+MonitoringWindowType = goodput_utils.MonitoringWindowType
 ValueType = gcp_metrics.ValueType
+UnproductiveTimeDict = goodput.UnproductiveTimeDict
 WorkloadMetricDetails = goodput_utils.WorkloadMetricDetails
 
 ACTIVITY_EXCLUSION_LIST = goodput_utils.ACTIVITY_EXCLUSION_LIST
@@ -186,16 +188,23 @@ class GoodputMonitor:
 
     self._writer.flush()
 
-  def _write_goodput_and_badput_data_to_tensorboard(
+  def _upload_goodput_metrics_to_tensorboard(
       self,
       job_goodput: float,
-      badput_breakdown: dict[BadputType, float],
+      badput_breakdown: UnproductiveTimeDict,
       last_step: int,
   ):
     """Writes goodput and badput breakdown to Tensorboard."""
-    self._write_goodput_to_tensorboard(job_goodput, last_step)
-    if self._include_badput_breakdown:
-      self._write_badput_to_tensorboard(badput_breakdown, last_step)
+    try:
+      self._write_goodput_to_tensorboard(job_goodput, last_step)
+      if self._include_badput_breakdown:
+        self._write_badput_to_tensorboard(badput_breakdown, last_step)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.error(
+          'Error while writing goodput and badput data to Tensorboard. This'
+          ' will not impact the workload. Error: %s',
+          e,
+      )
 
   def _write_goodput_to_tensorboard(self, job_goodput: float, last_step: int):
     self._log_tensorboard_scalars(
@@ -206,7 +215,7 @@ class GoodputMonitor:
 
   def _write_badput_to_tensorboard(
       self,
-      job_badput_breakdown: dict[BadputType, float | dict[str, float]],
+      job_badput_breakdown: UnproductiveTimeDict,
       last_step: int,
   ):
     """Writes badput breakdown to TensorBoard."""
@@ -226,27 +235,9 @@ class GoodputMonitor:
         last_step,
     )
 
-  def _query_and_upload_goodput_to_tensorboard(self):
-    """Queries and uploads goodput data to Tensorboard."""
-    try:
-      job_goodput, job_badput_breakdown, last_step = (
-          self._goodput_calculator.get_job_goodput(
-              include_badput_breakdown=self._include_badput_breakdown
-          )
-      )
-      self._write_goodput_and_badput_data_to_tensorboard(
-          job_goodput, job_badput_breakdown, last_step
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.error(
-          'Error while querying and uploading goodput to Tensorboard. This'
-          ' will not impact the workload. Error: %s',
-          e,
-      )
-
   def _flatten_badput_dict(
       self,
-      badput_time_dict: dict[BadputType, float | dict[str, float]],
+      badput_time_dict: UnproductiveTimeDict,
   ) -> list[tuple[str, float]]:
     """Flattens nested badput types into (label, value) pairs for export."""
     flat_badput = []
@@ -258,11 +249,14 @@ class GoodputMonitor:
         flat_badput.append((badput_type.name, val))
     return flat_badput
 
-  def _send_goodput_metrics_to_gcp(self, goodput_details: WorkloadMetricDetails):
+  def _upload_goodput_metrics_to_gcm(
+      self, goodput_details: WorkloadMetricDetails
+  ):
     """Sends goodput and badput metrics to GCP Monitoring."""
     try:
       gcp_goodput_metrics = []
 
+      # Populate goodput time metrics.
       for goodput_type, time_value in goodput_details[
           MetricType.GOODPUT_TIME.value
       ].items():
@@ -283,6 +277,8 @@ class GoodputMonitor:
                 'replica_id': self._gcp_options.replica_id,
             },
         })
+
+      # Populate badput time metrics.
       for badput_label, time_value in self._flatten_badput_dict(
           goodput_details[MetricType.BADPUT_TIME.value]
       ):
@@ -303,11 +299,93 @@ class GoodputMonitor:
                 'replica_id': self._gcp_options.replica_id,
             },
         })
+
+      # Populate disruption metrics.
+      disruption_count = goodput_details[MetricType.DISRUPTION_COUNT.value]
+      if disruption_count:
+        gcp_goodput_metrics.append({
+            'metric_type': 'compute.googleapis.com/workload/disruptions',
+            'value': disruption_count,
+            'value_type': ValueType.INT,
+            'metric_labels': {
+                'accelerator_type': self._gcp_options.acc_type,
+                'window_type': MonitoringWindowType.CUMULATIVE.value,
+            },
+            'resource_type': 'compute.googleapis.com/Workload',
+            'resource_labels': {
+                'location': self._gcp_options.location,
+                'workload_id': self._job_name,
+                'replica_id': self._gcp_options.replica_id,
+            },
+        })
+
+      # Populate max productive step metrics.
+      gcp_goodput_metrics.append({
+          'metric_type': 'compute.googleapis.com/workload/max_productive_steps',
+          'value': goodput_details[MetricType.MAX_PRODUCTIVE_STEP.value],
+          'value_type': ValueType.INT,
+          'metric_labels': {
+              'accelerator_type': self._gcp_options.acc_type,
+          },
+          'resource_type': 'compute.googleapis.com/Workload',
+          'resource_labels': {
+              'location': self._gcp_options.location,
+              'workload_id': self._job_name,
+              'replica_id': self._gcp_options.replica_id,
+          },
+      })
+
+      # Populate step time deviation metrics.
+      step_time_deviations = goodput_details[
+          MetricType.STEP_TIME_DEVIATION.value
+      ]
+      if step_time_deviations:
+        step_time_deviation_from_baseline = (
+            goodput_utils.compute_step_deviation_from_baseline(
+                step_time_deviations
+            )
+        )
+        gcp_goodput_metrics.append({
+            'metric_type': (
+                'compute.googleapis.com/workload/step_time_deviation'
+            ),
+            'value': step_time_deviation_from_baseline,
+            'value_type': ValueType.DOUBLE,
+            'metric_labels': {
+                'accelerator_type': self._gcp_options.acc_type,
+            },
+            'resource_type': 'compute.googleapis.com/Workload',
+            'resource_labels': {
+                'location': self._gcp_options.location,
+                'workload_id': self._job_name,
+                'replica_id': self._gcp_options.replica_id,
+            },
+        })
+
+      # Populate total elapsed time metrics.
+      gcp_goodput_metrics.append({
+          'metric_type': 'compute.googleapis.com/workload/total_elapsed_time',
+          'value': goodput_details[MetricType.TOTAL_ELAPSED_TIME.value],
+          'value_type': ValueType.DOUBLE,
+          'metric_labels': {
+              'accelerator_type': self._gcp_options.acc_type,
+              'window_type': MonitoringWindowType.CUMULATIVE.value,
+          },
+          'resource_type': 'compute.googleapis.com/Workload',
+          'resource_labels': {
+              'location': self._gcp_options.location,
+              'workload_id': self._job_name,
+              'replica_id': self._gcp_options.replica_id,
+          },
+      })
+
+      # Send metrics to Google Cloud Monitoring.
       if self._metrics_sender and gcp_goodput_metrics:
         self._metrics_sender.send_metrics(gcp_goodput_metrics)
+
     except Exception as e:  # pylint: disable=broad-exception-caught
       logger.error(
-          'Error while sending goodput metrics to GCP Monitoring. This'
+          'Error while sending goodput metrics to GCM. This'
           ' will not impact the workload. Error: %s',
           e,
       )
@@ -316,9 +394,26 @@ class GoodputMonitor:
     """Queries and uploads goodput data to Tensorboard."""
     while not self._termination_event.is_set():
       time.sleep(self._upload_interval)
-      self._query_and_upload_goodput_to_tensorboard()
+      # Query metrics and update the cache.
+      try:
+        job_goodput, job_badput_breakdown, last_step = (
+            self._goodput_calculator.get_job_goodput(
+                include_badput_breakdown=self._include_badput_breakdown
+            )
+        )
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error(
+            'Error while querying goodput. Skipping this cycle. Error: %s', e
+        )
+        continue
+      # Upload metrics to Tensorboard.
+      self._upload_goodput_metrics_to_tensorboard(
+          job_goodput, job_badput_breakdown, last_step
+      )
+
+      # Upload metrics to Google Cloud Monitoring.
       if self._gcp_options.enable_gcp_goodput_metrics:
-        self._send_goodput_metrics_to_gcp(
+        self._upload_goodput_metrics_to_gcm(
             self._goodput_calculator.get_job_goodput_details()
         )
 
@@ -335,11 +430,11 @@ class GoodputMonitor:
               include_badput_breakdown=self._include_badput_breakdown
           )
       )
-      self._write_goodput_and_badput_data_to_tensorboard(
+      self._upload_goodput_metrics_to_tensorboard(
           job_goodput, job_badput_breakdown, last_step
       )
       if self._gcp_options.enable_gcp_goodput_metrics:
-        self._send_goodput_metrics_to_gcp(
+        self._upload_goodput_metrics_to_gcm(
             self._goodput_calculator.get_job_goodput_details()
         )
       logger.info(
@@ -558,7 +653,7 @@ class GoodputMonitor:
         )
         # Add timezone since deltatime removes it.
         window_start = window_start.replace(tzinfo=datetime.timezone.utc)
-        self._send_goodput_metrics_to_gcp(
+        self._upload_goodput_metrics_to_gcm(
             self._goodput_calculator.get_job_goodput_interval_details(
                 window_start, window_end
             )
@@ -578,7 +673,7 @@ class GoodputMonitor:
       )
       # Add timezone since deltatime removes it.
       window_start = window_start.replace(tzinfo=datetime.timezone.utc)
-      self._send_goodput_metrics_to_gcp(
+      self._upload_goodput_metrics_to_gcm(
           self._goodput_calculator.get_job_goodput_interval_details(
               window_start, window_end
           )

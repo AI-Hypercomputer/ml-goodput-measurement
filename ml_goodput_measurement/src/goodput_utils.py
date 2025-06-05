@@ -46,6 +46,12 @@ class GCPOptions:
   enable_gcp_step_deviation_metrics: bool = True
 
 
+@dataclasses.dataclass
+class EntryTime:
+  field_name: str
+  timestamp: float
+
+
 # Metric type for upload and monitoring.
 class MetricType(enum.Enum):
   """The type of Metric."""
@@ -265,6 +271,16 @@ def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
   return sum(anomalous_step_times) - (
       len(anomalous_step_times) * normal_step_mean
   )
+
+
+def get_entry_time_from_log_entry(
+    entry: dict[str, Any],
+) -> Optional[EntryTime]:
+  """Extracts the TimeEntry from a log entry."""
+  for entry_label, entry_value in entry.items():
+    if _TIME_ENTRY in entry_label and isinstance(entry_value, (int, float)):
+      return EntryTime(field_name=entry_label, timestamp=float(entry_value))
+  return None
 
 
 def get_timestamp_from_log_entry(

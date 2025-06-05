@@ -54,7 +54,9 @@ class MockCloudLogger:
     if timestamp is not None:
       self.entries.append((timestamp, entry))
 
-  def read_cloud_logging_entries(self, start_time=None, end_time=None):
+  def read_cloud_logging_entries(
+      self, start_time=None, end_time=None, start_entry_time=None
+  ):
 
     def to_aware(dt):
       return (

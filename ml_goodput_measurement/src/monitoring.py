@@ -301,23 +301,21 @@ class GoodputMonitor:
         })
 
       # Populate disruption metrics.
-      disruption_count = goodput_details[MetricType.DISRUPTION_COUNT.value]
-      if disruption_count:
-        gcp_goodput_metrics.append({
-            'metric_type': 'compute.googleapis.com/workload/disruptions',
-            'value': disruption_count,
-            'value_type': ValueType.INT,
-            'metric_labels': {
-                'accelerator_type': self._gcp_options.acc_type,
-                'window_type': MonitoringWindowType.CUMULATIVE.value,
-            },
-            'resource_type': 'compute.googleapis.com/Workload',
-            'resource_labels': {
-                'location': self._gcp_options.location,
-                'workload_id': self._job_name,
-                'replica_id': self._gcp_options.replica_id,
-            },
-        })
+      gcp_goodput_metrics.append({
+          'metric_type': 'compute.googleapis.com/workload/disruptions',
+          'value': goodput_details[MetricType.DISRUPTION_COUNT.value],
+          'value_type': ValueType.INT,
+          'metric_labels': {
+              'accelerator_type': self._gcp_options.acc_type,
+              'window_type': MonitoringWindowType.CUMULATIVE.value,
+          },
+          'resource_type': 'compute.googleapis.com/Workload',
+          'resource_labels': {
+              'location': self._gcp_options.location,
+              'workload_id': self._job_name,
+              'replica_id': self._gcp_options.replica_id,
+          },
+      })
 
       # Populate max productive step metrics.
       gcp_goodput_metrics.append({

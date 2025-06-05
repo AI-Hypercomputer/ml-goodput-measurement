@@ -76,7 +76,7 @@ class GoodputCacheTest(googletest.TestCase):
     self.goodput_cache.clear_cache()
     self.assertEqual(self.goodput_cache.get_cached_entries(), [])
     self.assertIsNone(self.goodput_cache._goodput_info)
-    self.assertIsNone(self.goodput_cache._last_entry_timestamp)
+    self.assertIsNone(self.goodput_cache._last_entry_time)
 
   def test_is_cache_empty(self):
     self.assertTrue(self.goodput_cache.is_cache_empty())
@@ -87,8 +87,8 @@ class GoodputCacheTest(googletest.TestCase):
     ])
     self.assertFalse(self.goodput_cache.is_cache_empty())
 
-  def test_get_last_entry_timestamp(self):
-    self.assertIsNone(self.goodput_cache._last_entry_timestamp)
+  def test_get_last_entry_time(self):
+    self.assertIsNone(self.goodput_cache._last_entry_time)
     self.goodput_cache.update_cached_entries([
         {'time': 1, 'step': 1},
         {'time': 2, 'step': 2},
@@ -96,8 +96,8 @@ class GoodputCacheTest(googletest.TestCase):
     ])
     self.assertFalse(self.goodput_cache.is_cache_empty())
     self.assertEqual(
-        self.goodput_cache._last_entry_timestamp,
-        datetime.datetime.fromtimestamp(3, tz=datetime.timezone.utc),
+        self.goodput_cache.get_last_entry_time(),
+        goodput_utils.EntryTime('time', 3),
     )
 
   def test_get_step_info(self):

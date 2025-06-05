@@ -8,7 +8,6 @@ from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 
 StepInfo = goodput_utils.StepInfo
 GoodputInfo = goodput_utils.GoodputInfo
-_TIME_ENTRY = 'time'
 _JOB_START_TIME = 'job_start_time'
 _JOB_END_TIME = 'job_end_time'
 _STEP_START_TIME = 'step_start_time'
@@ -21,10 +20,10 @@ class GoodputCache:
     self._cached_entries = []
     self._step_entries = []
     self._goodput_info = None
-    self._last_entry_timestamp = None
     self._job_start_time = None
     self._job_end_time = None
     self._step_info = None
+    self._last_entry_time = None
 
   def update_step_info(self, step_info: StepInfo):
     """Updates the step information."""
@@ -33,25 +32,19 @@ class GoodputCache:
   def update_cached_entries(self, entries: list[Any]):
     """Updated the cached entries."""
     self._cached_entries.extend(entries)
-    self.update_last_entry_timestamp()
+    self.update_last_entry_time()
     self.update_job_start_time()
     self.update_job_end_time()
     new_step_entries = [entry for entry in entries if _STEP_START_TIME in entry]
     self._step_entries.extend(new_step_entries)
 
-  def update_last_entry_timestamp(self):
+  def update_last_entry_time(self):
     """Helper function to store the timestamp of the last entry in the cache."""
     if self._cached_entries:
       last_entry = self._cached_entries[-1]
-      last_entry_posix_time = [
-          entry_value
-          for entry_label, entry_value in last_entry.items()
-          if _TIME_ENTRY in entry_label
-      ]
-      if last_entry_posix_time:
-        self._last_entry_timestamp = datetime.datetime.fromtimestamp(
-            last_entry_posix_time[0], tz=datetime.timezone.utc
-        )
+      entry_time = goodput_utils.get_entry_time_from_log_entry(last_entry)
+      if entry_time:
+        self._last_entry_time = entry_time
 
   def update_job_start_time(self):
     """Updates the job start time."""
@@ -100,9 +93,9 @@ class GoodputCache:
     """Returns the job end time."""
     return self._job_end_time
 
-  def get_last_entry_timestamp(self):
-    """Returns the timestamp of the last entry in the cache."""
-    return self._last_entry_timestamp
+  def get_last_entry_time(self):
+    """Returns the last entry time."""
+    return self._last_entry_time
 
   def get_step_info(self):
     """Returns the step information."""
@@ -112,7 +105,7 @@ class GoodputCache:
     """Clears the cache."""
     self._cached_entries = []
     self._goodput_info = None
-    self._last_entry_timestamp = None
+    self._last_entry_time = None
 
   def is_cache_empty(self) -> bool:
     """Checks if the cache is empty."""

@@ -31,6 +31,7 @@ GoodputType = goodput_utils.GoodputType
 GoodputCache = goodput_cache.GoodputCache
 GoodputInfo = goodput_utils.GoodputInfo
 MetricType = goodput_utils.MetricType
+IntervalMetricType = goodput_utils.IntervalMetricType
 StepInfo = goodput_utils.StepInfo
 # Data structure to store the type of unproductive time (BadputType) and the
 # corresponding time in seconds. If the BadputType is CUSTOM_BADPUT_EVENTS, the
@@ -40,6 +41,7 @@ UnproductiveTimeDict = dict[
     BadputType, Union[float, dict[str, float]]
 ]
 WorkloadMetricDetails = goodput_utils.WorkloadMetricDetails
+IntervalWorkloadMetricDetails = goodput_utils.IntervalWorkloadMetricDetails
 
 _JOB_NAME = 'job_name'
 _STEP_COUNT = 'step_count'
@@ -1755,41 +1757,34 @@ class GoodputCalculator:
           MetricType.STEP_TIME_DEVIATION.value: step_time_deviation,
       }
 
-  def get_job_goodput_interval_details(
+  def get_interval_metric_details(
       self, interval_start: datetime.datetime, interval_end: datetime.datetime
-  ) -> WorkloadMetricDetails:
-    """Method to get the productive and non-productive time with breakdown of the job computed within an interval window."""
+  ) -> IntervalWorkloadMetricDetails:
+    """Method to get interval metric details."""
     try:
       (
-          goodput,
-          badput_breakdown,
-          max_productive_step,
-          total_job_time,
-          number_of_disruptions,
+          interval_goodput,
+          interval_badput_breakdown,
+          _,
+          _,
+          _,
       ) = self.get_job_goodput_interval(interval_start, interval_end)
-      productive_time = goodput * total_job_time / 100
-      total_unproductive_time = {}
-      for badput_type, badput_value in badput_breakdown.items():
-        total_unproductive_time[badput_type] = (
-            badput_value * total_job_time / 100
-        )
-      total_productive_time = {GoodputType.TOTAL: productive_time}
-
       return {
-          MetricType.GOODPUT_TIME.value: total_productive_time,
-          MetricType.BADPUT_TIME.value: total_unproductive_time,
-          MetricType.MAX_PRODUCTIVE_STEP.value: max_productive_step,
-          MetricType.TOTAL_ELAPSED_TIME.value: total_job_time,
-          MetricType.DISRUPTION_COUNT.value: number_of_disruptions,
-          MetricType.STEP_TIME_DEVIATION.value: {},
+          IntervalMetricType.INTERVAL_GOODPUT.value: {
+              GoodputType.TOTAL: interval_goodput
+          },
+          IntervalMetricType.INTERVAL_BADPUT.value: interval_badput_breakdown,
+          IntervalMetricType.INTERVAL_SIZE.value: (int)(
+              (interval_end - interval_start).total_seconds()
+          ),
       }
+
     except ValueError as e:
-      logger.warning('Failed to get job goodput interval details: %s', e)
+      logger.warning('Failed to get interval metric details: %s', e)
       return {
-          MetricType.GOODPUT_TIME.value: {},
-          MetricType.BADPUT_TIME.value: {},
-          MetricType.MAX_PRODUCTIVE_STEP.value: 0,
-          MetricType.TOTAL_ELAPSED_TIME.value: 0.0,
-          MetricType.DISRUPTION_COUNT.value: 0,
-          MetricType.STEP_TIME_DEVIATION.value: {},
+          IntervalMetricType.INTERVAL_GOODPUT.value: {},
+          IntervalMetricType.INTERVAL_BADPUT.value: {},
+          IntervalMetricType.INTERVAL_SIZE.value: (int)(
+              (interval_end - interval_start).total_seconds()
+          ),
       }

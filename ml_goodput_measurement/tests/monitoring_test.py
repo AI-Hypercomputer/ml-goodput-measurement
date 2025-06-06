@@ -17,6 +17,7 @@ BadputType = goodput_utils.BadputType
 GCPOptions = goodput_utils.GCPOptions
 GoodputMonitor = monitoring.GoodputMonitor
 GoodputType = goodput_utils.GoodputType
+IntervalMetricType = goodput_utils.IntervalMetricType
 MagicMock = mock.MagicMock
 MetricType = goodput_utils.MetricType
 ValueType = gcp_metrics.ValueType
@@ -708,30 +709,21 @@ class GoodputMonitorTests(absltest.TestCase):
     )
 
     # Mock the get_job_goodput_details to return test data
-    goodput_monitor._goodput_calculator.get_job_goodput_interval_details = (
-        MagicMock(
-            return_value={
-                MetricType.GOODPUT_TIME.value: {
-                    GoodputType.TOTAL: 10.0,
-                },
-                MetricType.BADPUT_TIME.value: {
-                    BadputType.TPU_INITIALIZATION: 2.0,
-                    BadputType.DATA_LOADING_SYNC: 1.0,
-                },
-                MetricType.DISRUPTION_COUNT.value: 0,
-                MetricType.MAX_PRODUCTIVE_STEP.value: 2,
-                MetricType.TOTAL_ELAPSED_TIME.value: 20.0,
-                MetricType.STEP_TIME_DEVIATION.value: {
-                    0: 1.0,
-                    1: 1.0,
-                    2: 1.0,
-                },
-            }
-        )
+    goodput_monitor._goodput_calculator.get_interval_metric_details = MagicMock(
+        return_value={
+            IntervalMetricType.INTERVAL_GOODPUT.value: {
+                GoodputType.TOTAL: 90.0,
+            },
+            IntervalMetricType.INTERVAL_BADPUT.value: {
+                BadputType.TPU_INITIALIZATION: 2.0,
+                BadputType.DATA_LOADING_SYNC: 8.0,
+            },
+            IntervalMetricType.INTERVAL_SIZE.value: 100,
+        }
     )
 
-    goodput_monitor._upload_goodput_metrics_to_gcm(
-        goodput_monitor._goodput_calculator.get_job_goodput_interval_details()
+    goodput_monitor._upload_interval_goodput_metrics_to_gcm(
+        goodput_monitor._goodput_calculator.get_interval_metric_details()
     )
 
     expected_calls = [
@@ -739,12 +731,13 @@ class GoodputMonitorTests(absltest.TestCase):
             name='projects/test-project',
             time_series=[
                 self._create_timeseries(
-                    'compute.googleapis.com/workload/goodput_time',
+                    'compute.googleapis.com/workload/interval_goodput',
                     {
                         'goodput_source': 'TOTAL',
                         'accelerator_type': 'test-acc-type',
+                        'rolling_window_size': '100',
                     },
-                    10.0,
+                    90.0,
                 )
             ],
         ),
@@ -752,10 +745,11 @@ class GoodputMonitorTests(absltest.TestCase):
             name='projects/test-project',
             time_series=[
                 self._create_timeseries(
-                    'compute.googleapis.com/workload/badput_time',
+                    'compute.googleapis.com/workload/interval_badput',
                     {
                         'badput_source': 'TPU_INITIALIZATION',
                         'accelerator_type': 'test-acc-type',
+                        'rolling_window_size': '100',
                     },
                     2.0,
                 )
@@ -765,62 +759,13 @@ class GoodputMonitorTests(absltest.TestCase):
             name='projects/test-project',
             time_series=[
                 self._create_timeseries(
-                    'compute.googleapis.com/workload/badput_time',
+                    'compute.googleapis.com/workload/interval_badput',
                     {
                         'badput_source': 'DATA_LOADING_SYNC',
                         'accelerator_type': 'test-acc-type',
+                        'rolling_window_size': '100',
                     },
-                    1.0,
-                )
-            ],
-        ),
-        mock.call.create_time_series(
-            name='projects/test-project',
-            time_series=[
-                self._create_timeseries(
-                    'compute.googleapis.com/workload/disruptions',
-                    {
-                        'accelerator_type': 'test-acc-type',
-                        'window_type': 'CUMULATIVE',
-                    },
-                    0,
-                )
-            ],
-        ),
-        mock.call.create_time_series(
-            name='projects/test-project',
-            time_series=[
-                self._create_timeseries(
-                    'compute.googleapis.com/workload/max_productive_steps',
-                    {
-                        'accelerator_type': 'test-acc-type',
-                    },
-                    2,
-                )
-            ],
-        ),
-        mock.call.create_time_series(
-            name='projects/test-project',
-            time_series=[
-                self._create_timeseries(
-                    'compute.googleapis.com/workload/total_elapsed_time',
-                    {
-                        'accelerator_type': 'test-acc-type',
-                        'window_type': 'CUMULATIVE',
-                    },
-                    20.0,
-                )
-            ],
-        ),
-        mock.call.create_time_series(
-            name='projects/test-project',
-            time_series=[
-                self._create_timeseries(
-                    'compute.googleapis.com/workload/step_time_deviation',
-                    {
-                        'accelerator_type': 'test-acc-type',
-                    },
-                    1.0,
+                    8.0,
                 )
             ],
         ),

@@ -52,15 +52,24 @@ class EntryTime:
   timestamp: float
 
 
-# Metric type for upload and monitoring.
+# Cumulative metric types for upload and monitoring.
 class MetricType(enum.Enum):
-  """The type of Metric."""
+  """The type of CUMULATIVE Metric."""
   GOODPUT_TIME = 'goodput_time'
   BADPUT_TIME = 'badput_time'
   MAX_PRODUCTIVE_STEP = 'max_productive_step'
   TOTAL_ELAPSED_TIME = 'total_elapsed_time'
   DISRUPTION_COUNT = 'disruption_count'
   STEP_TIME_DEVIATION = 'step_time_deviation'
+
+
+# Interval metric types for upload and monitoring.
+class IntervalMetricType(enum.Enum):
+  """The type of INTERVAL Metric."""
+
+  INTERVAL_GOODPUT = 'interval_goodput'
+  INTERVAL_BADPUT = 'interval_badput'
+  INTERVAL_SIZE = 'interval_size'
 
 
 # Productive time is not broken down by activities yet. As such, we only have
@@ -93,6 +102,13 @@ class WorkloadMetricDetails(TypedDict):
   total_elapsed_time: float
   disruption_count: int
   step_time_deviation: dict[int, float]
+
+
+class IntervalWorkloadMetricDetails(TypedDict):
+  interval_goodput: dict[GoodputType, float]
+  interval_badput: dict[BadputType, float | dict[str, float]]
+  interval_size: int  # Unit: seconds.
+
 
 ACTIVITY_EXCLUSION_LIST = [
     # DATA_LOADING_ASYNC is not a non-productive activity as it is not

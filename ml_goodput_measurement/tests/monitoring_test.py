@@ -333,6 +333,7 @@ class GoodputMonitorTests(absltest.TestCase):
                 1: 1.0,
                 2: 1.0,
             },
+            MetricType.IDEAL_STEP_TIME.value: 1.0,
         }
     )
 
@@ -430,6 +431,18 @@ class GoodputMonitorTests(absltest.TestCase):
                 )
             ],
         ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/performance',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
     ]
 
     actual_calls = mock_client.create_time_series.call_args_list
@@ -493,6 +506,7 @@ class GoodputMonitorTests(absltest.TestCase):
                 1: 1.0,
                 2: 1.0,
             },
+            MetricType.IDEAL_STEP_TIME.value: 1.0,
         }
     )
 
@@ -556,6 +570,7 @@ class GoodputMonitorTests(absltest.TestCase):
                 1: 1.0,
                 2: 1.0,
             },
+            MetricType.IDEAL_STEP_TIME.value: 1.0,
         }
     )
 
@@ -648,6 +663,18 @@ class GoodputMonitorTests(absltest.TestCase):
             time_series=[
                 self._create_timeseries(
                     'compute.googleapis.com/workload/step_time_deviation',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/performance',
                     {
                         'accelerator_type': 'test-acc-type',
                     },
@@ -834,6 +861,7 @@ class GoodputMonitorTests(absltest.TestCase):
                 1: 1.0,
                 2: 1.0,
             },
+            MetricType.IDEAL_STEP_TIME.value: 1.0,
         }
     )
 
@@ -924,6 +952,18 @@ class GoodputMonitorTests(absltest.TestCase):
             time_series=[
                 self._create_timeseries(
                     'compute.googleapis.com/workload/step_time_deviation',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                    },
+                    1.0,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/performance',
                     {
                         'accelerator_type': 'test-acc-type',
                     },

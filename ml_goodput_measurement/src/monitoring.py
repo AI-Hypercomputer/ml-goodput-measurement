@@ -379,6 +379,19 @@ class GoodputMonitor:
           },
       })
 
+      # Populate ideal step time metrics.
+      gcm_metrics.append({
+          'metric_type': 'compute.googleapis.com/workload/performance',
+          'value': goodput_details[MetricType.IDEAL_STEP_TIME.value],
+          'value_type': ValueType.DOUBLE,
+          'resource_type': 'compute.googleapis.com/Workload',
+          'resource_labels': {
+              'location': self._gcp_options.location,
+              'workload_id': self._job_name,
+              'replica_id': self._gcp_options.replica_id,
+          },
+      })
+
       # Send metrics to Google Cloud Monitoring.
       if self._metrics_sender and gcm_metrics:
         self._metrics_sender.send_metrics(gcm_metrics)

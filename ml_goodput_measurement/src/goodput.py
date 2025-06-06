@@ -1163,9 +1163,6 @@ class GoodputCalculator:
     self._interval_entries = self._cloud_logger.read_cloud_logging_entries(  # type: ignore
         start_time, end_time
     )
-    logging.info(
-        'Inspecting interval entries between %s and %s', start_time, end_time
-    )
 
     if not self._interval_entries:
       raise ValueError(
@@ -1700,6 +1697,7 @@ class GoodputCalculator:
             MetricType.TOTAL_ELAPSED_TIME.value: 0.0,
             MetricType.DISRUPTION_COUNT.value: 0,
             MetricType.STEP_TIME_DEVIATION.value: {},
+            MetricType.IDEAL_STEP_TIME.value: 0.0,
         }
 
       (
@@ -1740,11 +1738,11 @@ class GoodputCalculator:
           if step_info and step_info.step_deviations
           else {}
       )
-
-      # Currently productive_time is not split based on productive activities, it
-      # is just the total productive time. We will modify this to follow the same
-      # format as badput_breakdown. Please update this code accordingly in the
-      # future when we have more granular breakdown of productive time.
+      ideal_step_time = (
+          step_info.ideal_step_time
+          if step_info and step_info.ideal_step_time
+          else 0.0
+      )
 
       total_productive_time = {GoodputType.TOTAL: productive_training_time}
 
@@ -1755,6 +1753,7 @@ class GoodputCalculator:
           MetricType.TOTAL_ELAPSED_TIME.value: total_elapsed_time,
           MetricType.DISRUPTION_COUNT.value: number_of_disruptions,
           MetricType.STEP_TIME_DEVIATION.value: step_time_deviation,
+          MetricType.IDEAL_STEP_TIME.value: ideal_step_time,
       }
 
   def get_interval_metric_details(

@@ -61,6 +61,7 @@ class MetricType(enum.Enum):
   TOTAL_ELAPSED_TIME = 'total_elapsed_time'
   DISRUPTION_COUNT = 'disruption_count'
   STEP_TIME_DEVIATION = 'step_time_deviation'
+  IDEAL_STEP_TIME = 'ideal_step_time'
 
 
 # Interval metric types for upload and monitoring.
@@ -102,6 +103,7 @@ class WorkloadMetricDetails(TypedDict):
   total_elapsed_time: float
   disruption_count: int
   step_time_deviation: dict[int, float]
+  ideal_step_time: float
 
 
 class IntervalWorkloadMetricDetails(TypedDict):

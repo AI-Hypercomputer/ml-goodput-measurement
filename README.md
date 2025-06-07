@@ -536,47 +536,71 @@ goodput_monitor = monitoring.GoodputMonitor(
     )
 ```
 
-If you want to monitor Step Time Deviation, configure the `GoodputMonitor`
-as follows:
-
-```python
-goodput_logger_name = f'goodput_{config.run_name}' # You can choose your own logger name.
-goodput_monitoring_enabled = config.monitor_goodput and jax.process_index() == 0 # Check for configs whether or not the enable monitoring.
-
-goodput_monitor = monitoring.GoodputMonitor(
-      job_name=config.run_name,
-      logger_name=logger_name,
-      tensorboard_dir=config.tensorboard_dir,
-      upload_interval=config.goodput_upload_interval_seconds,
-      monitoring_enabled=True,
-      include_badput_breakdown=True,
-      include_step_deviation=True,
-      configured_ideal_step_time=None # Optional, the library will compute ideal step time if it is not provided
-    )
-```
+### Monitor Cumulative Goodput Metrics
 
 #### Start asynchronous "query and upload" of Goodput
 
 Call the `start_goodput_uploader` API to spin off a thread which continuously
-queries and uploads Goodput.
+queries and uploads cumulative Goodput metrics to Tensorboard & Google Cloud
+Monitoring.
 
-Note: This will upload Goodput and Badput data to Google Cloud Monitoring
+> **_NOTE:_** This will upload computed metrics to Google Cloud Monitoring
 by default.
+
+Following metrics are uploaded:
+
+  - Productive Time (Goodput)
+  - Unproductive Time (Badput Breakdown)
+  - Total Elapsed Time
+  - Maximum Productive Step Count
+  - Disruptions Count
+  - Step Time Deviation
+  - Ideal Step Time
 
 ```python
 goodput_monitor.start_goodput_uploader()
 ```
 
-#### Start asynchronous "query and upload" of Step Time Deviation
+#### Stop the Goodput Uploader
 
-Call the `start_step_deviation_uploader` API to spin off a thread which
-continuously queries and uploads step time deviation.
+Call the `stop_goodput_uploader` API to perform a final upload of all metrics
+and safely exit.
 
-Note: This will upload Step Time Deviation data to Google Cloud Monitoring
-by default.
+> **_NOTE:_** This will stop all cumulative metrics upload threads.
 
 ```python
-goodput_monitor.start_step_deviation_uploader()
+goodput_monitor.stop_goodput_uploader()
+```
+
+### Monitor Rolling Window Goodput Metrics
+
+#### Start asynchronous "query and upload" of Rolling Window Goodput
+
+Call the `start_rolling_window_goodput_uploader` API to start a background
+thread that continuously queries and uploads **rolling window goodput metrics**
+to Google Cloud Monitoring.
+
+You must provide a list of window durations in seconds (e.g., `[60, 300, 900]`
+for 1 min, 5 min, and 15 min windows).
+
+Following metrics are uploaded:
+
+  - Rolling Window Goodput
+  - Rolling Window Badput Breakdown
+
+```python
+goodput_monitor.start_rolling_window_goodput_uploader(rolling_windows_seconds=[60, 300, 900])
+```
+
+#### Stop the Rolling Window Goodput Uploader
+
+Call the `stop_goodput_rolling_window_uploader` API to perform a final upload
+of rolling window metrics and safely shut down the background uploader thread.
+
+> **_NOTE:_** This will stop all rolling window metrics upload threads.
+
+```python
+goodput_monitor.stop_goodput_rolling_window_uploader()
 ```
 
 #### Visualize on Tensorboard
@@ -584,9 +608,32 @@ goodput_monitor.start_step_deviation_uploader()
 1. Make sure you have `tensorboard-plugin-profile`, `tensorflow` and `tensorboard` packages installed
 2. Follow instructions [here](https://cloud.google.com/tpu/docs/profile-tpu-vm#start_profiling_the_model_training) to start the Tensorboard server
 
-#### Access Goodput, Badput and Step Deviation on Google Cloud Monitoring
+#### Access Metrics on Google Cloud Monitoring
 
-By default, performance data ([goodput](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/goodput_time), [badput](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/badput_time), and [step deviation](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/performance)) is automatically sent to Google Cloud Monitoring, enabling visualization on dashboards.
+By default, performance data is automatically sent to Google Cloud Monitoring,
+enabling visualization and alerting on dashboards. This includes both cumulative
+and rolling window metrics.
+
+The metrics currently sent to Google Cloud Monitoring are:
+
+- **Cumulative Goodput:**
+  [workload/goodput_time](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/goodput_time)
+- **Cumulative Badput:**
+  [workload/badput_time](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/badput_time)
+- **Rolling Window Goodput:**
+  [workload/interval_goodput](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/interval_goodput)
+- **Rolling Window Badput:**
+  [workload/interval_badput](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/interval_badput)
+- **Total Elapsed Time:**
+  [workload/total_elapsed_time](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/total_elapsed_time)
+- **Maximum Productive Step:**
+  [workload/max_productive_steps](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/max_productive_steps)
+- **Disruption Count:**
+  [workload/disruptions](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/disruptions)
+- **Step Time Deviation:**
+  [workload/step_time_deviation](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/step_time_deviation)
+- **Ideal Step Time:**
+  [workload/performance](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/performance)
 
 This feature leverages Google VM metadata (project ID, location, accelerator type)
 and supports replica IDs for uniquely identifying workloads in multi-replica
@@ -674,24 +721,3 @@ goodput_monitor = monitoring.GoodputMonitor(
       gcp_options=gcp_options
     )
 ```
-
-#### Start asynchronous "query and upload" of Interval Goodput to GCM.
-
-Call the `start_goodput_interval_uploader` API and specify `window_size_seconds`
-to compute Goodput and Badput metrics only in the sliding time window.
-The interval starts `window_size_seconds` prior to time of query, ends at time
-of query, and moves ahead by `upload_interval` seconds.
-
-This call is asynchronous and will only upload Goodput and Badput data to
-Google Cloud Monitoring, and not to Tensorboard.
-
-```python
-# Set the window size to be 12h
-goodput_monitor.start_goodput_interval_uploader(window_size_seconds = 43200)
-```
-
-Note: Google Cloud Monitoring will allow you to view all the metrics reported
-during the entire workload. GCM will also allow you to filter by any time window
-(irrespective of `window_size_seconds`). Each data point that is reported by
-this API will correspond to computation only within the sliding window of size
-`window_size_seconds`.

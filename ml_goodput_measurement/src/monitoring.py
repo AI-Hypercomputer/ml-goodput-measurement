@@ -160,7 +160,7 @@ class GoodputMonitor:
     try:
       self.stop_goodput_uploader()
       self.stop_step_deviation_uploader()
-      self.stop_goodput_rolling_window_uploader()
+      self.stop_rolling_window_goodput_uploader()
 
     except Exception:  # pylint: disable=broad-exception-caught
       pass
@@ -803,7 +803,7 @@ class GoodputMonitor:
     self._interval_goodput_upload_thread.start()
     self._interval_uploader_thread_running = True
 
-  def stop_goodput_rolling_window_uploader(self):
+  def stop_rolling_window_goodput_uploader(self):
     """Stops the rolling window goodput uploader thread and performs a final rolling window goodput upload."""
     if not self._interval_uploader_thread_running:
       raise RuntimeError(

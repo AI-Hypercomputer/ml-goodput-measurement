@@ -594,13 +594,13 @@ goodput_monitor.start_rolling_window_goodput_uploader(rolling_windows_seconds=[6
 
 #### Stop the Rolling Window Goodput Uploader
 
-Call the `stop_goodput_rolling_window_uploader` API to perform a final upload
+Call the `stop_rolling_window_goodput_uploader` API to perform a final upload
 of rolling window metrics and safely shut down the background uploader thread.
 
 > **_NOTE:_** This will stop all rolling window metrics upload threads.
 
 ```python
-goodput_monitor.stop_goodput_rolling_window_uploader()
+goodput_monitor.stop_rolling_window_goodput_uploader()
 ```
 
 #### Visualize on Tensorboard

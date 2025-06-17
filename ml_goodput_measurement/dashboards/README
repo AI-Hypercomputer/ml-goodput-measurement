@@ -1,0 +1,39 @@
+# Google Cloud Monitoring Dashboard: Goodput Monitor
+
+This README provides instructions for deploying the `goodput_dashboard.json`
+dashboard to your Google Cloud project's Monitoring console. This dashboard
+offers a comprehensive view of "goodput" metrics, helping you monitor the
+various Goodput metrics for your workloads and set up custom alerts for "events"
+such as performance degradation.
+
+---
+
+## Deployment Steps
+
+Follow these steps to create a new custom dashboard using the provided JSON
+configuration:
+
+1.  **Navigate to the Monitoring Console**: In your Google Cloud project,
+    go to the **Monitoring** section. From the left-hand navigation menu,
+    select **Dashboards**.
+
+2.  **Create Custom Dashboard**: Click the **Create Custom Dashboard** button.
+
+3.  **Use JSON Editor**: In the new dashboard interface, select the
+    **JSON editor** option.
+
+4.  **Copy and Save Configuration**: Open the `goodput_dashboard.json` file.
+    Copy its entire content and paste it into the JSON editor. Once pasted,
+    click **Save**.
+
+---
+
+Your "Goodput Monitor" dashboard should now be visible and operational within
+your custom dashboards list.
+
+---
+
+> **_NOTE:_** This dashboard is intended to be a starting point for your
+> monitoring needs. We recommend customizing it to meet your specific needs.
+> Please refer to the [Monitoring Dashboard documentation](https://cloud.google.com/monitoring/dashboards)
+> for further guidance and customization options.

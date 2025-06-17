@@ -1,0 +1,1010 @@
+{
+  "displayName": "Goodput Monitoring",
+  "annotations": {
+    "defaultResourceNames": [],
+    "eventAnnotations": []
+  },
+  "dashboardFilters": [],
+  "labels": {},
+  "mosaicLayout": {
+    "columns": 48,
+    "tiles": [
+      {
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Overview",
+          "id": "",
+          "text": {
+            "content": "This dashboard provides a comprehensive view of your ML workload performance by tracking goodput and output metrics for accelerated workloads (GPUs, TPUs). Leverage this data to optimize resource utilization and identify performance bottlenecks. To learn more about the data in this dashboard, see [ml-goodput-measurement](https://github.com/AI-Hypercomputer/ml-goodput-measurement).\n \\\n \\\nThe dashboard contains following sections: \n- **Executive summary**: An overview of the goodput health of your VMs.\n- **Workload Goodput Breakdown**: A detailed analysis of each goodput of your workloads.\n- **Badput Analysis**: An in-depth analysis of badput sources and their impact.\n- **Accelerator Type Analysis**: Goodput and Badput by accelerators.\n- **Detailed Time Series Data**: Raw time series data.\n\nFor more information about these metrics, see [Goodput and Badput Metrics](https://cloud.google.com/ai-hypercomputer/docs/monitor#available-metrics).",
+            "format": "MARKDOWN",
+            "style": {
+              "backgroundColor": "#FFFFFF",
+              "fontSize": "FS_LARGE",
+              "horizontalAlignment": "H_LEFT",
+              "padding": "P_EXTRA_SMALL",
+              "pointerLocation": "POINTER_LOCATION_UNSPECIFIED",
+              "textColor": "#212121",
+              "verticalAlignment": "V_TOP"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 16,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Aggregate Goodput Summary",
+          "id": "",
+          "sectionHeader": {
+            "dividerBelow": true,
+            "subtitle": "This section displays an overview of the overall goodput across your workloads"
+          }
+        }
+      },
+      {
+        "yPos": 20,
+        "height": 18,
+        "width": 14,
+        "widget": {
+          "title": "Overall Goodput (%) for Active Workloads",
+          "id": "",
+          "scorecard": {
+            "breakdowns": [],
+            "dimensions": [],
+            "gaugeView": {
+              "lowerBound": 0,
+              "upperBound": 100
+            },
+            "measures": [],
+            "thresholds": [
+              {
+                "color": "YELLOW",
+                "direction": "BELOW",
+                "label": "",
+                "targetAxis": "TARGET_AXIS_UNSPECIFIED",
+                "value": 80
+              },
+              {
+                "color": "RED",
+                "direction": "BELOW",
+                "label": "",
+                "targetAxis": "TARGET_AXIS_UNSPECIFIED",
+                "value": 60
+              }
+            ],
+            "timeSeriesQuery": {
+              "outputFullDuration": false,
+              "prometheusQuery": "# Overall Goodput Score (%) of workloads that were active in the selected time window\n\nround(\n  (\n    sum (last_over_time(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}]))\n    /\n    (\n      sum (last_over_time(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}]))\n      +\n      sum (last_over_time(compute_googleapis_com:workload_badput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}]))\n    )\n  ) * 10000\n) / 100",
+              "unitOverride": ""
+            }
+          }
+        }
+      },
+      {
+        "yPos": 20,
+        "xPos": 14,
+        "height": 9,
+        "width": 10,
+        "widget": {
+          "title": "Number of Active Workloads",
+          "id": "",
+          "scorecard": {
+            "breakdowns": [],
+            "dimensions": [],
+            "measures": [],
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [],
+            "timeSeriesQuery": {
+              "outputFullDuration": false,
+              "prometheusQuery": "# The count of workloads still running at the end of the chosen time window\n\ncount(count by (workload_id) (last_over_time(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}])))",
+              "unitOverride": ""
+            }
+          }
+        }
+      },
+      {
+        "yPos": 20,
+        "xPos": 24,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Overall Goodput Evolution (%)",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "STACKED_AREA",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "prometheusQuery": "# Aggregated goodput evolution over time\n\nlabel_replace(sum((compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}))\n/\n(\n    sum((compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}))\n +\n    sum((compute_googleapis_com:workload_badput_time{monitored_resource=\"compute.googleapis.com/Workload\"}))\n) * 100, \"name\", \"Goodput (%)\", \"\", \"\")",
+                  "unitOverride": "%"
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Goodput (%)",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 29,
+        "xPos": 14,
+        "height": 9,
+        "width": 10,
+        "widget": {
+          "title": "Number of Unique Workloads",
+          "id": "",
+          "scorecard": {
+            "breakdowns": [],
+            "dimensions": [],
+            "measures": [],
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [],
+            "timeSeriesQuery": {
+              "outputFullDuration": true,
+              "prometheusQuery": "# The count of unique workloads that are either running or were active during the chosen time window\n\ncount(sum by (workload_id)(last_over_time(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}])))",
+              "unitOverride": ""
+            }
+          }
+        }
+      },
+      {
+        "yPos": 38,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Workload-Specific Goodput",
+          "id": "",
+          "sectionHeader": {
+            "dividerBelow": false,
+            "subtitle": "This section provides a detailed breakdown of goodput performance for each individual workload, allowing you to identify outliers and understand workload-specific trends."
+          }
+        }
+      },
+      {
+        "yPos": 42,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Goodput Evolution per Workload",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "prometheusQuery": "# Goodput evolution for each workload\n\nsum by (workload_id)(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"})/(sum by (workload_id)(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}) + sum by (workload_id)(compute_googleapis_com:workload_badput_time{monitored_resource=\"compute.googleapis.com/Workload\"})) * 100",
+                  "unitOverride": "%"
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Goodput (%)",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 42,
+        "xPos": 24,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Goodput Summary per Active Workload",
+          "id": "",
+          "timeSeriesTable": {
+            "columnSettings": [
+              {
+                "displayName": "Workload ID",
+                "alignment": "CENTER",
+                "column": "workload_id",
+                "visible": true
+              },
+              {
+                "displayName": "Goodput time",
+                "alignment": "CENTER",
+                "column": "value",
+                "visible": true
+              },
+              {
+                "displayName": "Badput time",
+                "alignment": "CENTER",
+                "column": "value-1",
+                "visible": true
+              },
+              {
+                "displayName": "Goodput score",
+                "alignment": "CENTER",
+                "column": "value-2",
+                "visible": true
+              }
+            ],
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "secondary": false,
+                "tableTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "prometheusQuery": "sum by (workload_id)(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"})",
+                  "unitOverride": "s"
+                }
+              },
+              {
+                "breakdowns": [],
+                "secondary": false,
+                "tableTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "prometheusQuery": "sum by (workload_id)(compute_googleapis_com:workload_badput_time{monitored_resource=\"compute.googleapis.com/Workload\"})",
+                  "unitOverride": "s"
+                }
+              },
+              {
+                "breakdowns": [],
+                "secondary": false,
+                "tableTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "prometheusQuery": "(sum by (workload_id)(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}))/\n(\n    (\n        sum by (workload_id)(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"})\n        +\n        sum by (workload_id)(compute_googleapis_com:workload_badput_time{monitored_resource=\"compute.googleapis.com/Workload\"})\n    ) \n) * 100",
+                  "unitOverride": "%"
+                }
+              }
+            ],
+            "displayColumnType": false,
+            "metricVisualization": "BAR",
+            "opsAnalyticsSettings": {
+              "maxRows": "0",
+              "pageSize": "0",
+              "showFilterBar": false
+            }
+          }
+        }
+      },
+      {
+        "yPos": 60,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Goodput Time Per Workload",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "Productive Time ${resource.labels.workload_id}",
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.label.\"workload_id\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/goodput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Productive Time ",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 76,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Detailed Badput Analysis",
+          "id": "",
+          "sectionHeader": {
+            "dividerBelow": false,
+            "subtitle": "This section provides a comprehensive analysis of badput, highlighting key sources and the distribution of non-productive time across your active workloads. Use this data to pinpoint bottlenecks and optimize resource utilization."
+          }
+        }
+      },
+      {
+        "yPos": 80,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Top Badput Sources (Active Workloads)",
+          "id": "",
+          "pieChart": {
+            "chartType": "DONUT",
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "sliceNameTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.\"badput_source\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/badput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "showLabels": false,
+            "showTotal": false,
+            "sliceAggregatedThreshold": 0
+          }
+        }
+      },
+      {
+        "yPos": 80,
+        "xPos": 24,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Aggregated Badput Time Per Workload and Source",
+          "id": "",
+          "timeSeriesTable": {
+            "columnSettings": [
+              {
+                "displayName": "Badput Source",
+                "column": "badput_source",
+                "visible": true
+              },
+              {
+                "displayName": "Workload ID",
+                "column": "workload_id",
+                "visible": true
+              },
+              {
+                "displayName": "Badput Time",
+                "column": "value",
+                "visible": true
+              },
+              {
+                "displayName": "Badput Score",
+                "column": "value-1",
+                "visible": true
+              }
+            ],
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "minAlignmentPeriod": "60s",
+                "secondary": false,
+                "tableTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.\"badput_source\"",
+                        "resource.label.\"workload_id\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/badput_time\" resource.type=\"compute.googleapis.com/Workload\"",
+                    "pickTimeSeriesFilter": {
+                      "direction": "TOP",
+                      "numTimeSeries": 30,
+                      "rankingMethod": "METHOD_LATEST"
+                    }
+                  },
+                  "unitOverride": ""
+                }
+              },
+              {
+                "breakdowns": [],
+                "secondary": false,
+                "tableTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "prometheusQuery": "(\n  sum by (badput_source, workload_id) (compute_googleapis_com:workload_badput_time)\n/ on(workload_id) group_left()\n  (\n    sum by (workload_id) (compute_googleapis_com:workload_goodput_time)\n    +\n    sum by (workload_id) (compute_googleapis_com:workload_badput_time)\n  )\n) * 100",
+                  "unitOverride": "%"
+                }
+              }
+            ],
+            "displayColumnType": false,
+            "metricVisualization": "BAR",
+            "opsAnalyticsSettings": {
+              "maxRows": "0",
+              "pageSize": "0",
+              "showFilterBar": false
+            }
+          }
+        }
+      },
+      {
+        "yPos": 98,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Badput Time per Workload",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.label.\"workload_id\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/badput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Non-Productive Time",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 98,
+        "xPos": 24,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Badput Time per Badput Source",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "plotType": "STACKED_AREA",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.\"badput_source\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/badput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Non-Productive Time",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 116,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Accelerator-Specific Goodput Performance",
+          "id": "",
+          "sectionHeader": {
+            "dividerBelow": false,
+            "subtitle": "This section provides a detailed analysis of goodput and badput performance for each accelerator type of the active workloads, enabling you to compare efficiency and identify potential hardware bottlenecks."
+          }
+        }
+      },
+      {
+        "yPos": 120,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Real-Time Goodput per Accelerator Type (Active Workloads)",
+          "id": "",
+          "scorecard": {
+            "breakdowns": [],
+            "dimensions": [],
+            "gaugeView": {
+              "lowerBound": 0,
+              "upperBound": 100
+            },
+            "measures": [],
+            "thresholds": [
+              {
+                "color": "YELLOW",
+                "direction": "BELOW",
+                "label": "",
+                "targetAxis": "TARGET_AXIS_UNSPECIFIED",
+                "value": 80
+              },
+              {
+                "color": "RED",
+                "direction": "BELOW",
+                "label": "",
+                "targetAxis": "TARGET_AXIS_UNSPECIFIED",
+                "value": 60
+              }
+            ],
+            "timeSeriesQuery": {
+              "outputFullDuration": false,
+              "prometheusQuery": "round(\n  (\n    sum by (accelerator_type) (last_over_time(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}]))\n    /\n    (\n      sum by (accelerator_type) (last_over_time(compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}]))\n      +\n      sum by (accelerator_type) (last_over_time(compute_googleapis_com:workload_badput_time{monitored_resource=\"compute.googleapis.com/Workload\"}[${__interval}]))\n    )\n  ) * 10000\n) / 100",
+              "unitOverride": ""
+            }
+          }
+        }
+      },
+      {
+        "yPos": 120,
+        "xPos": 24,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Goodput Evolution per Accelerator Type",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "prometheusQuery": "# Goodput evolution per accelerator type\n\nsum by (accelerator_type) (compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"})\n/\n(\n  sum by (accelerator_type) (compute_googleapis_com:workload_goodput_time{monitored_resource=\"compute.googleapis.com/Workload\"})\n  +\n  sum by (accelerator_type) (compute_googleapis_com:workload_badput_time{monitored_resource=\"compute.googleapis.com/Workload\"})\n) * 100",
+                  "unitOverride": "%"
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Goodput (%)",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 138,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Top Badput Sources per Accelerator Type (Active Workloads)",
+          "id": "",
+          "pieChart": {
+            "chartType": "DONUT",
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "sliceNameTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.\"badput_source\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/badput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "showLabels": false,
+            "showTotal": false,
+            "sliceAggregatedThreshold": 0
+          }
+        }
+      },
+      {
+        "yPos": 138,
+        "xPos": 24,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Badput Sources per Accelerator Type",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "plotType": "STACKED_AREA",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.\"accelerator_type\"",
+                        "metric.label.\"badput_source\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/badput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Time",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 156,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Raw Time Series Data",
+          "id": "",
+          "sectionHeader": {
+            "dividerBelow": false,
+            "subtitle": "This section provides raw time series data for goodput and badput, enabling granular analysis and detailed investigations. Use this data to identify subtle patterns, troubleshoot performance issues, and conduct in-depth experimentation."
+          }
+        }
+      },
+      {
+        "yPos": 160,
+        "height": 18,
+        "width": 48,
+        "widget": {
+          "title": "Goodput Time Series",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.label.\"workload_id\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/goodput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Productive Time ",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 178,
+        "height": 18,
+        "width": 48,
+        "widget": {
+          "title": "Badput Time Series",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "minAlignmentPeriod": "60s",
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesFilter": {
+                    "aggregation": {
+                      "alignmentPeriod": "60s",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.\"badput_source\"",
+                        "resource.label.\"workload_id\""
+                      ],
+                      "perSeriesAligner": "ALIGN_NEXT_OLDER"
+                    },
+                    "filter": "metric.type=\"compute.googleapis.com/workload/badput_time\" resource.type=\"compute.googleapis.com/Workload\""
+                  },
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "label": "Non-Productive Time",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 196,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Workload Hang Monitoring",
+          "sectionHeader": {
+            "dividerBelow": false,
+            "subtitle": "This section monitors Workload Hang metrics as a time series: Step Count, Step Time Deviation, Ideal Step Time, Disruption Count "
+          }
+        }
+      },
+      {
+        "yPos": 200,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Maximum Step Count",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/max_productive_steps'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_max_productive_steps_aggregate:\n       aggregate(value.max_productive_steps)]"
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 216,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Step Time Deviation",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/step_time_deviation'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_step_time_deviation_aggregate: aggregate(value.step_time_deviation)]"
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 232,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Ideal Step Time",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/performance'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_performance_aggregate: aggregate(value.performance)]"
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 248,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Disruption Information",
+          "sectionHeader": {
+            "dividerBelow": false,
+            "subtitle": "This section monitors workload disruption metrics "
+          }
+        }
+      },
+      {
+        "yPos": 252,
+        "height": 22,
+        "width": 25,
+        "widget": {
+          "title": "Disruption Count Per Workload",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/disruptions'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id, metric.window_type],\n    [value_disruptions_aggregate: aggregate(value.disruptions)]"
+                }
+              }
+            ],
+            "thresholds": [],
+            "yAxis": {
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 252,
+        "xPos": 25,
+        "height": 23,
+        "width": 23,
+        "widget": {
+          "title": "Disruption Badput Breakdown",
+          "pieChart": {
+            "chartType": "DONUT",
+            "dataSets": [
+              {
+                "minAlignmentPeriod": "60s",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/badput_time'\n| filter metric.badput_source = 'INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION' || metric.badput_source = 'WASTED_PROGRESS_FROM_DISRUPTION'\n| align next_older(1m)\n| every 1m\n| group_by [metric.badput_source],\n    [value_badput_time_aggregate: aggregate(value.badput_time)]"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

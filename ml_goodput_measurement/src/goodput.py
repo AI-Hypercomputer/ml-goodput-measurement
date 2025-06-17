@@ -935,20 +935,20 @@ class GoodputCalculator:
             # Add the additional time it took for the job to restart after last
             # interruption. These conditions are only met when the job is
             # restarted after a disruption.
-            # TODO(dishaw): This is the infrastructure disruption Badput and can
-            # go into a separate bucket.
-            disruption_badput = job_start_time - self._last_disruption_time
+            infrastructure_disruption_badput = (
+                job_start_time - self._last_disruption_time
+            )
             if (
-                BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+                BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
                 in segment_unproductive_time
             ):
               segment_unproductive_time[
-                  BadputType.WASTED_PROGRESS_FROM_DISRUPTION
-              ] += disruption_badput
+                  BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
+              ] += infrastructure_disruption_badput
             else:
               segment_unproductive_time[
-                  BadputType.WASTED_PROGRESS_FROM_DISRUPTION
-              ] = disruption_badput
+                  BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
+              ] = infrastructure_disruption_badput
 
           # The second bucket is individually computed either from recorded
           # logs (TPU initialization, training preparation, data loading) or
@@ -1648,6 +1648,18 @@ class GoodputCalculator:
     badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION] = (
         (wasted_progress_from_disruption_badput / total_job_time) * 100
         if 0 < wasted_progress_from_disruption_badput < total_job_time
+        else 0.0
+    )
+
+    # Infrastructure recovery from disruption badput.
+    infrastructure_recovery_from_disruption_badput = (
+        total_unproductive_time.get(
+            BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION, 0.0
+        )
+    )
+    badput_breakdown[BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION] = (
+        (infrastructure_recovery_from_disruption_badput / total_job_time) * 100
+        if 0 < infrastructure_recovery_from_disruption_badput < total_job_time
         else 0.0
     )
 

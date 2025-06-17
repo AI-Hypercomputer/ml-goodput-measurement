@@ -1382,12 +1382,9 @@ class BadputTest(googletest.TestCase):
     _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
         include_badput_breakdown=True
     )
-    wasted_progress_and_disruption_time = (
-        disruption_time
-        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
-    )
-    expected_badput_due_to_disruptions = (
-        (wasted_progress_and_disruption_time.total_seconds())
+    wasted_progress_time = (restart_from_step * _TEST_STEP_TIME)
+    expected_badput_due_to_wasted_progress = (
+        (wasted_progress_time.total_seconds())
         / total_time.total_seconds()
         * 100
     )
@@ -1399,7 +1396,7 @@ class BadputTest(googletest.TestCase):
     )
     self.assertAlmostEqual(
         computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
-        expected_badput_due_to_disruptions,
+        expected_badput_due_to_wasted_progress,
         delta=0.1,
     )
 
@@ -1575,12 +1572,9 @@ class BadputTest(googletest.TestCase):
     _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
         include_badput_breakdown=True
     )
-    wasted_progress_and_disruption_time = (
-        disruption_time
-        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
-    )
-    expected_badput_due_to_disruptions = (
-        (wasted_progress_and_disruption_time.total_seconds())
+    wasted_progress_time = ((restart_from_step) * _TEST_STEP_TIME)
+    expected_badput_due_to_wasted_progress = (
+        (wasted_progress_time.total_seconds())
         / total_time.total_seconds()
         * 100
     )
@@ -1592,7 +1586,7 @@ class BadputTest(googletest.TestCase):
     )
     self.assertAlmostEqual(
         computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
-        expected_badput_due_to_disruptions,
+        expected_badput_due_to_wasted_progress,
         delta=0.1,
     )
     self.assertIn(
@@ -1728,12 +1722,9 @@ class BadputTest(googletest.TestCase):
     expected_goodput = (
         (productive_time.total_seconds()) / total_time.total_seconds() * 100
     )
-    wasted_progress_and_disruption_time = (
-        disruption_time
-        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
-    )
-    expected_badput_due_to_disruptions = (
-        (wasted_progress_and_disruption_time.total_seconds())
+    wasted_progress_time = ((restart_from_step) * _TEST_STEP_TIME)
+    expected_badput_due_to_wasted_progress = (
+        (wasted_progress_time.total_seconds())
         / total_time.total_seconds()
         * 100
     )
@@ -1754,7 +1745,7 @@ class BadputTest(googletest.TestCase):
     )
     self.assertAlmostEqual(
         computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
-        expected_badput_due_to_disruptions,
+        expected_badput_due_to_wasted_progress,
         delta=0.1,
     )
 
@@ -2027,14 +2018,126 @@ class BadputTest(googletest.TestCase):
         expected_unproductive_time,
         delta=0.1,
     )
-    expected_wasted_progress_from_disruption = (
+    expected_infrastructure_recovery_from_disruption = (
         disruption_time + (restart_step - 2) * _TEST_STEP_TIME
     )
     self.assertAlmostEqual(
         cached_goodput_info.total_unproductive_time[
-            BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+            BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
         ],
-        expected_wasted_progress_from_disruption.total_seconds(),
+        expected_infrastructure_recovery_from_disruption.total_seconds(),
+        delta=0.1,
+    )
+
+  def test_badput_calculator_infrastructure_badput_from_disruption(self):
+    """Validate computation of badput due to infrastructure recovery from disruptions."""
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    # Mock training preparation.
+    self.goodput_recorder.record_training_preparation_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+    self.goodput_recorder.record_training_preparation_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    # Mock data loading.
+    self.goodput_recorder.record_data_loading_start_time(
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+    )
+    self.goodput_recorder.record_data_loading_end_time(
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    # Mock training.
+    step_start_time = (
+        job_start_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+    # Keep track of the last disrupted step.
+    restart_from_step = 2
+    last_disrupted_step = _TEST_TOTAL_STEPS - restart_from_step
+    last_disrupted_step_start_time = step_start_time
+
+    # All steps but first progress with average step time.
+    for step in range(_TEST_TOTAL_STEPS):
+      # Record step time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      # Add startup badput during the first step
+      if step == 0:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+      if step == last_disrupted_step:
+        last_disrupted_step_start_time = step_start_time
+
+    # Simulate a disruption.
+    disruption_time = datetime.timedelta(seconds=5)
+
+    job_restart_time = step_start_time + disruption_time
+    self.goodput_recorder.record_job_start_time(job_restart_time)
+    step_start_time = (
+        job_restart_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+
+    # All steps but first progress with average step time.
+    for step in range(restart_from_step, _TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      if step == restart_from_step:
+        step_start_time += _TEST_FIRST_STEP_EXTRA_TIME
+
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + disruption_time
+        + _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+        + _TEST_FIRST_STEP_EXTRA_TIME
+        + (_TEST_TOTAL_STEPS - restart_from_step) * _TEST_STEP_TIME
+    )
+
+    job_end_time = job_start_time + total_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Badput.
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+
+    expected_badput_due_to_infrastructure_recovery = (
+        ((job_restart_time - last_disrupted_step_start_time).total_seconds())
+        / total_time.total_seconds()
+        * 100
+    )
+
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION,
+        computed_badput_breakdown,
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[
+            BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
+        ],
+        expected_badput_due_to_infrastructure_recovery,
         delta=0.1,
     )
 

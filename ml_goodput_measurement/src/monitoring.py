@@ -432,11 +432,7 @@ class GoodputMonitor:
 
   def _final_goodput_query_and_upload(self):
     """Performs final cumulative goodput query and uploads data to Tensorboard & GCM."""
-    logger.info(
-        'Final goodput query and upload for job: %s and logger: %s',
-        self._job_name,
-        self._logger_name,
-    )
+    time.sleep(self._upload_interval)
     try:
       job_goodput, job_badput_breakdown, last_step = (
           self._goodput_calculator.get_job_goodput(
@@ -578,11 +574,7 @@ class GoodputMonitor:
 
   def _final_step_deviation_query_and_upload(self):
     """Performs final step deviation query and uploads data to Tensorboard & GCM."""
-    logger.info(
-        'Final step deviation query and upload for job: %s and logger: %s',
-        self._job_name,
-        self._logger_name,
-    )
+    time.sleep(self._step_deviation_interval_seconds)
     try:
       step_deviation = self._goodput_calculator.get_step_deviation(
           self._configured_ideal_step_time
@@ -652,12 +644,7 @@ class GoodputMonitor:
 
   def _final_rolling_window_goodput_query_and_upload(self):
     """Performs final rolling window goodput query and uploads data to GCM for all rolling windows."""
-    logger.info(
-        'Final rolling window goodput query and upload for job: %s and'
-        ' logger: %s',
-        self._job_name,
-        self._logger_name,
-    )
+    time.sleep(self._upload_interval)
     try:
       now = datetime.datetime.now(datetime.timezone.utc)
 

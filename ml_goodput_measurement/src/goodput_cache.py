@@ -23,28 +23,28 @@ class GoodputCache:
     self._job_start_time = None
     self._job_end_time = None
     self._step_info = None
-    self._last_entry_time = None
+    self._last_entry_info = None
 
   def update_step_info(self, step_info: StepInfo):
     """Updates the step information."""
     self._step_info = step_info
 
-  def update_cached_entries(self, entries: list[Any]):
+  def update_cached_entries(
+      self, entries: list[Any], last_entry_info: tuple[datetime.datetime, str]
+  ):
     """Updated the cached entries."""
     self._cached_entries.extend(entries)
-    self.update_last_entry_time()
+    self.update_last_entry_info(last_entry_info)
     self.update_job_start_time()
     self.update_job_end_time()
     new_step_entries = [entry for entry in entries if _STEP_START_TIME in entry]
     self._step_entries.extend(new_step_entries)
 
-  def update_last_entry_time(self):
-    """Helper function to store the timestamp of the last entry in the cache."""
-    if self._cached_entries:
-      last_entry = self._cached_entries[-1]
-      entry_time = goodput_utils.get_entry_time_from_log_entry(last_entry)
-      if entry_time:
-        self._last_entry_time = entry_time
+  def update_last_entry_info(
+      self, last_entry_info: tuple[datetime.datetime, str]
+  ):
+    """Updates the last entry's timestamp and unique identifier."""
+    self._last_entry_info = last_entry_info
 
   def update_job_start_time(self):
     """Updates the job start time."""
@@ -93,9 +93,9 @@ class GoodputCache:
     """Returns the job end time."""
     return self._job_end_time
 
-  def get_last_entry_time(self):
-    """Returns the last entry time."""
-    return self._last_entry_time
+  def get_last_entry_info(self):
+    """Returns the last entry info (timestamp and unique identifier)."""
+    return self._last_entry_info
 
   def get_step_info(self):
     """Returns the step information."""
@@ -105,7 +105,7 @@ class GoodputCache:
     """Clears the cache."""
     self._cached_entries = []
     self._goodput_info = None
-    self._last_entry_time = None
+    self._last_entry_info = None
 
   def is_cache_empty(self) -> bool:
     """Checks if the cache is empty."""

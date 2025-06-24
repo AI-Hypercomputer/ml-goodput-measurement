@@ -1,13 +1,14 @@
 """Tests to unit test GoodputCache class."""
 
 import datetime
-from unittest import mock
 
 from cloud_goodput.ml_goodput_measurement.src import goodput_cache
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType, GoodputInfo
 
 from google3.testing.pybase import googletest
+
+BadputType = goodput_utils.BadputType
+GoodputInfo = goodput_utils.GoodputInfo
 
 
 class GoodputCacheTest(googletest.TestCase):
@@ -22,7 +23,7 @@ class GoodputCacheTest(googletest.TestCase):
         {'time': 2, 'step': 2},
         {'time': 3, 'step': 3},
     ]
-    self.goodput_cache.update_cached_entries(mock_entries)
+    self.goodput_cache.update_cached_entries(mock_entries, (3, 'mock_entry-3'))
     self.assertFalse(self.goodput_cache.is_cache_empty())
     self.assertEqual(self.goodput_cache.get_cached_entries(), mock_entries)
 
@@ -53,7 +54,7 @@ class GoodputCacheTest(googletest.TestCase):
         {'time': 2, 'step': 2},
         {'time': 3, 'step': 3},
     ]
-    self.goodput_cache.update_cached_entries(mock_entries)
+    self.goodput_cache.update_cached_entries(mock_entries, (3, 'mock_entry-3'))
     self.goodput_cache.update_goodput_info(
         GoodputInfo(
             total_productive_time=100,
@@ -76,29 +77,18 @@ class GoodputCacheTest(googletest.TestCase):
     self.goodput_cache.clear_cache()
     self.assertEqual(self.goodput_cache.get_cached_entries(), [])
     self.assertIsNone(self.goodput_cache._goodput_info)
-    self.assertIsNone(self.goodput_cache._last_entry_time)
 
   def test_is_cache_empty(self):
     self.assertTrue(self.goodput_cache.is_cache_empty())
-    self.goodput_cache.update_cached_entries([
-        {'time': 1, 'step': 1},
-        {'time': 2, 'step': 2},
-        {'time': 3, 'step': 3},
-    ])
-    self.assertFalse(self.goodput_cache.is_cache_empty())
-
-  def test_get_last_entry_time(self):
-    self.assertIsNone(self.goodput_cache._last_entry_time)
-    self.goodput_cache.update_cached_entries([
-        {'time': 1, 'step': 1},
-        {'time': 2, 'step': 2},
-        {'time': 3, 'step': 3},
-    ])
-    self.assertFalse(self.goodput_cache.is_cache_empty())
-    self.assertEqual(
-        self.goodput_cache.get_last_entry_time(),
-        goodput_utils.EntryTime('time', 3),
+    self.goodput_cache.update_cached_entries(
+        [
+            {'time': 1, 'step': 1},
+            {'time': 2, 'step': 2},
+            {'time': 3, 'step': 3},
+        ],
+        (3, 'mock_entry-3'),
     )
+    self.assertFalse(self.goodput_cache.is_cache_empty())
 
   def test_get_step_info(self):
     step_info = goodput_utils.StepInfo(
@@ -110,19 +100,25 @@ class GoodputCacheTest(googletest.TestCase):
 
   def test_update_job_start_time(self):
     self.assertIsNone(self.goodput_cache._job_start_time)
-    self.goodput_cache.update_cached_entries([
-        {'step_start_time': 2, 'step': 1},
-        {'step_start_time': 3, 'step': 2},
-        {'job_end_time': 4},
-    ])
+    self.goodput_cache.update_cached_entries(
+        [
+            {'step_start_time': 2, 'step': 1},
+            {'step_start_time': 3, 'step': 2},
+            {'job_end_time': 4},
+        ],
+        (3, 'mock_entry-3'),
+    )
     self.assertIsNone(self.goodput_cache._job_start_time)
-    self.goodput_cache.update_cached_entries([
-        {'job_start_time': 1},
-        {'job_start_time': 9},
-        {'step_start_time': 2, 'step': 1},
-        {'step_start_time': 3, 'step': 2},
-        {'job_end_time': 4},
-    ])
+    self.goodput_cache.update_cached_entries(
+        [
+            {'job_start_time': 1},
+            {'job_start_time': 9},
+            {'step_start_time': 2, 'step': 1},
+            {'step_start_time': 3, 'step': 2},
+            {'job_end_time': 4},
+        ],
+        (3, 'mock_entry-3'),
+    )
     self.assertEqual(
         self.goodput_cache._job_start_time,
         datetime.datetime.fromtimestamp(1, tz=datetime.timezone.utc),
@@ -130,11 +126,14 @@ class GoodputCacheTest(googletest.TestCase):
 
   def test_update_job_end_time(self):
     self.assertIsNone(self.goodput_cache._job_end_time)
-    self.goodput_cache.update_cached_entries([
-        {'job_end_time': 1},
-        {'job_end_time': 2},
-        {'job_end_time': 3},
-    ])
+    self.goodput_cache.update_cached_entries(
+        [
+            {'job_end_time': 1},
+            {'job_end_time': 2},
+            {'job_end_time': 3},
+        ],
+        (3, 'mock_entry-3'),
+    )
     self.assertEqual(
         self.goodput_cache._job_end_time,
         datetime.datetime.fromtimestamp(3, tz=datetime.timezone.utc),

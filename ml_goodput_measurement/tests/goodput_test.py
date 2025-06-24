@@ -4,15 +4,18 @@ import dataclasses
 from dataclasses import asdict
 import datetime
 import random
-import time
 import threading
+import time
 from typing import Optional
 
 from cloud_goodput.ml_goodput_measurement.src import goodput
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import BadputType
-from cloud_goodput.ml_goodput_measurement.src.goodput_utils import compute_ideal_step_time, get_timestamp_from_log_entry
+from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 
 from google3.testing.pybase import googletest
+
+get_timestamp_from_log_entry = goodput_utils.get_timestamp_from_log_entry
+compute_ideal_step_time = goodput_utils.compute_ideal_step_time
+BadputType = goodput_utils.BadputType
 
 
 # Fake job timeline information for test purposes.
@@ -48,14 +51,16 @@ class MockCloudLogger:
     self.job_name = job_name
     self.logger_name = logger_name
     self.entries = []
+    self.last_entry_info = None
 
   def write_cloud_logging_entry(self, entry):
     timestamp = get_timestamp_from_log_entry(entry)
     if timestamp is not None:
       self.entries.append((timestamp, entry))
+      self.last_entry_info = (timestamp, timestamp)
 
   def read_cloud_logging_entries(
-      self, start_time=None, end_time=None, start_entry_time=None
+      self, start_time=None, end_time=None, last_entry_info=None
   ):
 
     def to_aware(dt):
@@ -72,7 +77,7 @@ class MockCloudLogger:
         for timestamp, entry in self.entries
         if (start_time is None or to_aware(timestamp) > start_time)
         and (end_time is None or to_aware(timestamp) <= end_time)
-    ]
+    ], self.last_entry_info
 
 
 @dataclasses.dataclass
@@ -234,7 +239,7 @@ class GoodputTest(googletest.TestCase):
     self._mock_sample_program()
 
     # Ensure read returns the right number of entries.
-    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    validate_entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
     # There should be one entry for each of the 5 steps, one job start
     # and one job end entry.
     self.assertLen(validate_entries, _TEST_TOTAL_STEPS + 2)
@@ -267,7 +272,7 @@ class GoodputTest(googletest.TestCase):
     # Emulate job run timeline.
     self._mock_sample_program_with_badput()
 
-    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    validate_entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
 
     # Ensure payload contains the required information.
     expected_keys = {
@@ -732,7 +737,7 @@ class BadputTest(googletest.TestCase):
     )
 
     # Ensure read returns the right number of entries.
-    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    validate_entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
     self.assertLen(validate_entries, 2)
     # Ensure payload contains the expected information.
     for entry_payload in validate_entries:
@@ -766,7 +771,7 @@ class BadputTest(googletest.TestCase):
     )
 
     # Ensure read returns the right number of entries.
-    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    validate_entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
     self.assertLen(validate_entries, 2)
     # Ensure payload contains the expected information.
     for entry_payload in validate_entries:
@@ -793,7 +798,7 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_training_preparation_end_time(None)
 
     # Ensure read returns the right number of entries.
-    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    validate_entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
     self.assertLen(validate_entries, 2)
     # Ensure payload contains the expected information.
     for entry_payload in validate_entries:
@@ -833,7 +838,7 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_data_loading_end_time(data_loading_end_time)
 
     # Ensure read returns the right number of entries.
-    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    validate_entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
     self.assertLen(validate_entries, 2)
     # Ensure payload contains the expected information.
     for entry_payload in validate_entries:
@@ -860,7 +865,7 @@ class BadputTest(googletest.TestCase):
     self.goodput_recorder.record_data_loading_end_time(None)
 
     # Ensure read returns the right number of entries.
-    validate_entries = self.mock_cloud_logger.read_cloud_logging_entries()
+    validate_entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
     self.assertLen(validate_entries, 2)
     # Ensure payload contains the expected information.
     for entry_payload in validate_entries:
@@ -1088,13 +1093,12 @@ class BadputTest(googletest.TestCase):
       self.goodput_recorder.record_step_start_time(step, step_start_time)
       # Record async (overlapped) data loading.
       self.goodput_recorder.record_data_loading_start_time(
-        step_start_time + _TEST_STEP_TIME
+          step_start_time + _TEST_STEP_TIME
       )
       self.goodput_recorder.record_data_loading_end_time(
-         step_start_time + _TEST_STEP_TIME
-          + _TEST_DATA_LOADING_TIME
+          step_start_time + _TEST_STEP_TIME + _TEST_DATA_LOADING_TIME
       )
-      step_start_time += (_TEST_STEP_TIME + _TEST_DATA_LOADING_TIME)
+      step_start_time += _TEST_STEP_TIME + _TEST_DATA_LOADING_TIME
 
     total_time = (
         _TEST_TPU_INIT_TIME

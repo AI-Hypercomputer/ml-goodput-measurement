@@ -26,7 +26,6 @@ CheckpointLoggerOptions = checkpoint_badput_calculator.CheckpointLoggerOptions
 CheckpointBadputCalculator = (
     checkpoint_badput_calculator.CheckpointBadputCalculator
 )
-EntryTime = goodput_utils.EntryTime
 GoodputType = goodput_utils.GoodputType
 GoodputCache = goodput_cache.GoodputCache
 GoodputInfo = goodput_utils.GoodputInfo
@@ -104,7 +103,9 @@ class _CloudLogger:
       self,
       start_time: Optional[datetime.datetime],
       end_time: Optional[datetime.datetime],
-      start_entry_time: Optional[EntryTime] = None,
+      last_entry_info: Optional[
+          tuple[datetime.datetime, str]
+      ] = None,  # (timestamp, id)
   ) -> str:
     """Gets the filter message for the Cloud Logging query."""
     filter_entries = [
@@ -119,25 +120,39 @@ class _CloudLogger:
 
     filter_entries.append(f'timestamp<="{end_time.isoformat()}"')
 
-    # Add a filter to bind a start-time to the query window (if available).
-    if start_time is None:
-      if self.job_start_time is not None:
-        start_time = self.job_start_time - datetime.timedelta(seconds=10)
+    # Determine the effective start time and id for filtering.
+    effective_start_timestamp: Optional[datetime.datetime] = None
+    effective_start_entry_id: Optional[str] = None
 
-    if start_time is not None:
-      if start_time.tzinfo is None:
-        start_time = start_time.replace(tzinfo=datetime.timezone.utc)
-      filter_entries.append(f'timestamp>"{start_time.isoformat()}"')
-
-    # If a precise TimeEntry is provided, filter on payload field with a
-    # microsecond bump.
-    if start_entry_time is not None:
-      epsilon = 1e-6  # 1 microsecond
-      payload_timestamp = round(start_entry_time.timestamp + epsilon, 6)
-      payload_filter = (
-          f'jsonPayload.{start_entry_time.field_name} > {payload_timestamp}'
+    if last_entry_info:
+      effective_start_timestamp, effective_start_entry_id = last_entry_info
+    elif start_time is not None:
+      effective_start_timestamp = start_time
+      if effective_start_timestamp.tzinfo is None:
+        effective_start_timestamp = effective_start_timestamp.replace(
+            tzinfo=datetime.timezone.utc
+        )
+    elif self.job_start_time is not None:
+      effective_start_timestamp = self.job_start_time - datetime.timedelta(
+          seconds=10
       )
-      filter_entries.append(payload_filter)
+      if effective_start_timestamp.tzinfo is None:
+        effective_start_timestamp = effective_start_timestamp.replace(
+            tzinfo=datetime.timezone.utc
+        )
+
+    if effective_start_timestamp is not None:
+      if effective_start_entry_id:
+        filter_clause = (
+            f'(timestamp > "{effective_start_timestamp.isoformat()}" OR'
+            f' (timestamp = "{effective_start_timestamp.isoformat()}" AND'
+            f' insertId > "{effective_start_entry_id}"))'
+        )
+        filter_entries.append(filter_clause)
+      else:
+        filter_entries.append(
+            f'timestamp>"{effective_start_timestamp.isoformat()}"'
+        )
 
     return ' AND '.join(filter_entries)
 
@@ -155,13 +170,15 @@ class _CloudLogger:
       self,
       start_time: Optional[datetime.datetime] = None,
       end_time: Optional[datetime.datetime] = None,
-      start_entry_time: Optional[EntryTime] = None,
+      last_entry_info: Optional[tuple[datetime.datetime, str]] = None,
   ):
     """Queries Cloud Logging entries for the specific job.
 
     Args:
       start_time: The start time of the query window.
       end_time: The end time of the query window.
+      last_entry_info: The timestamp and unique identifier of the last entry
+        previously read.
 
     Returns:
       Filtered entries in ascending order of timestamp.
@@ -169,13 +186,37 @@ class _CloudLogger:
     import google.cloud.logging  # pylint: disable=g-import-not-at-top
 
     entries = self.logger.list_entries(
-        filter_=self._get_filter_msg(start_time, end_time, start_entry_time),
+        filter_=self._get_filter_msg(start_time, end_time, last_entry_info),
         order_by=google.cloud.logging.ASCENDING,
         page_size=_CLOUD_LOGGING_PAGE_SIZE,
     )
-    entry_payload = [entry.payload for entry in entries]
+    entries_info = [
+        {
+            'payload': entry.payload,
+            'timestamp': entry.timestamp,
+            'id': entry.insert_id,
+        }
+        for entry in entries
+    ]
+
+    if entries_info and last_entry_info:
+      first_entry = entries_info[0]
+      last_entry_ts, last_entry_id = last_entry_info
+      if (
+          first_entry['timestamp'] == last_entry_ts
+          and first_entry['id'] == last_entry_id
+      ):
+        entries_info = entries_info[1:]
+
+    current_last_entry_ts, current_last_entry_id = (
+        (entries_info[-1]['timestamp'], entries_info[-1]['id'])
+        if entries_info
+        else (None, None)
+    )
+
+    entry_payload = [entry['payload'] for entry in entries_info]
     self._update_job_start_time(entry_payload)
-    return entry_payload
+    return entry_payload, (current_last_entry_ts, current_last_entry_id)
 
 
 class GoodputRecorder:
@@ -1126,29 +1167,32 @@ class GoodputCalculator:
 
   def _fetch_new_entries(self, query_time: datetime.datetime) -> list[Any]:
     """Thread-safe helper function to update and return new log entries."""
+    new_entries = []
+    current_last_entry_info = None
     with self._goodput_cache_lock:
       if not self._goodput_cache.is_cache_empty():
-        last_entry_time = self._goodput_cache.get_last_entry_time()
-        if (
-            last_entry_time
-            and query_time.timestamp() <= last_entry_time.timestamp
-        ):
-          return []
-        start_dt = (
-            datetime.datetime.fromtimestamp(
-                last_entry_time.timestamp, tz=datetime.timezone.utc
-            )
-            if last_entry_time
-            else None
-        )
-        new_entries = self._cloud_logger.read_cloud_logging_entries(
-            start_dt, query_time, start_entry_time=last_entry_time
-        )
+        cached_last_entry_info = self._goodput_cache.get_last_entry_info()
+        if cached_last_entry_info:
+          cached_last_entry_ts, _ = cached_last_entry_info
+          if query_time <= cached_last_entry_ts:
+            return []
+
+          new_entries, current_last_entry_info = (
+              self._cloud_logger.read_cloud_logging_entries(
+                  start_time=cached_last_entry_ts,
+                  end_time=query_time,
+                  last_entry_info=cached_last_entry_info,
+              )
+          )
       else:
-        new_entries = self._cloud_logger.read_cloud_logging_entries()
+        new_entries, current_last_entry_info = (
+            self._cloud_logger.read_cloud_logging_entries()
+        )
 
       # Update the cache with the new log entries.
-      self._goodput_cache.update_cached_entries(new_entries)
+      self._goodput_cache.update_cached_entries(
+          new_entries, current_last_entry_info
+      )
       return new_entries
 
   def _get_interval_log_entries(
@@ -1160,7 +1204,7 @@ class GoodputCalculator:
           'Start and end times are required to get log entries from an interval'
           ' window.'
       )
-    self._interval_entries = self._cloud_logger.read_cloud_logging_entries(  # type: ignore
+    self._interval_entries, _ = self._cloud_logger.read_cloud_logging_entries(  # type: ignore
         start_time, end_time
     )
 
@@ -1357,9 +1401,12 @@ class GoodputCalculator:
       )
 
     # Compute and store step information.
-    self._compute_step_info_and_update_cache(
-        new_entries, configured_ideal_step_time
-    )
+    try:
+      self._compute_step_info_and_update_cache(
+          new_entries, configured_ideal_step_time
+      )
+    except Exception as e:  # pylint: disable=broad-except
+      logging.info('Failed to compute step information: %s', e)
 
     return job_goodput, job_badput_breakdown, max_productive_step
 

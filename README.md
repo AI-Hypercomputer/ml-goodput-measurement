@@ -354,12 +354,13 @@ class BadputType(enum.Enum):
   TRAINING_PREP = 2
   PROGRAM_STARTUP = 3
   DATA_LOADING_SYNC = 4
-  DATA_LOADING_ASYNC = 5 # This does not affect Goodput
+  DATA_LOADING_ASYNC = 5
   UNPRODUCTIVE_CHECKPOINT_SAVE_TIME = 6
   UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME = 7
   WASTED_PROGRESS_FROM_DISRUPTION = 8
-  CUSTOM_BADPUT_EVENTS = 9
-  OTHER = 10
+  INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION = 9
+  CUSTOM_BADPUT_EVENTS = 10
+  OTHER = 11
 ```
 
 #### Badput Breakdown Details
@@ -416,6 +417,12 @@ class BadputType(enum.Enum):
  lost after restart as well as time lost for the infrastructure to restart the
  workload.
 
+ - Infrastructure Recovery Time due to Disruption (INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION)
+
+ This is the time taken by the infrastructure to restart the workload after a
+ disruption. The root-cause of the disruption could be anything (application layer,
+ infrastructure layer, hardware layer).
+
   When there is a disruption, Badput is expected to accumulate in
   each of the following buckets after restart:
 
@@ -423,6 +430,7 @@ class BadputType(enum.Enum):
   - Training Preparation
   - Program Startup
   - Wasted Progress due to Disruption
+  - Infrastructure Recovery Time
 
  - Custom Badput Events (CUSTOM_BADPUT_EVENTS)
 
@@ -442,7 +450,8 @@ print(f"Badput due to TPU initialization: {badput_breakdown[goodput.BadputType.T
 print(f"Badput due to training preparation: {badput_breakdown[goodput.BadputType.TRAINING_PREP]:.2f}%")
 print(f"Badput due to program startup: {badput_breakdown[goodput.BadputType.PROGRAM_STARTUP]:.2f}%")
 print(f"Badput due to data loading: {badput_breakdown[goodput.BadputType.DATA_LOADING_SYNC]:.2f}%")
-print(f"Badput due to disruption and wasted progress: {badput_breakdown[goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION]:.2f}%")
+print(f"Badput due to wasted progress from disruption: {badput_breakdown[goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION]:.2f}%")
+print(f"Badput due to infrastructure recovery from disruption: {badput_breakdown[goodput.BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION]:.2f}%")
 print(f"Badput due to checkpoint save: {badput_breakdown[goodput.BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME]:.2f}%")
 print(f"Badput due to checkpoint restore: {badput_breakdown[goodput.BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME]:.2f}%")
 print(f"Badput due to step evaluation: {badput_breakdown[goodput.BadputType.CUSTOM_BADPUT_EVENTS].get('EVAL_STEP', 0.0):.2f}%")

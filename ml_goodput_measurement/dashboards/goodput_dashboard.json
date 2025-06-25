@@ -16,7 +16,7 @@
           "title": "Overview",
           "id": "",
           "text": {
-            "content": "This dashboard provides a comprehensive view of your ML workload performance by tracking goodput and output metrics for accelerated workloads (GPUs, TPUs). Leverage this data to optimize resource utilization and identify performance bottlenecks. To learn more about the data in this dashboard, see [ml-goodput-measurement](https://github.com/AI-Hypercomputer/ml-goodput-measurement).\n \\\n \\\nThe dashboard contains following sections: \n- **Executive summary**: An overview of the goodput health of your VMs.\n- **Workload Goodput Breakdown**: A detailed analysis of each goodput of your workloads.\n- **Badput Analysis**: An in-depth analysis of badput sources and their impact.\n- **Accelerator Type Analysis**: Goodput and Badput by accelerators.\n- **Detailed Time Series Data**: Raw time series data.\n\nFor more information about these metrics, see [Goodput and Badput Metrics](https://cloud.google.com/ai-hypercomputer/docs/monitor#available-metrics).",
+            "content": "This dashboard provides a comprehensive view of your ML workload performance by tracking various goodput and badput metrics for accelerated workloads (GPUs, TPUs). Leverage this data to optimize resource utilization and identify performance bottlenecks. \n\nTo learn more about the ML Goodput Measurement library and how the metrics used by this dashboard are computed, see [ml-goodput-measurement](https://github.com/AI-Hypercomputer/ml-goodput-measurement).\n \nThe dashboard contains following sections: \n- **Executive summary**: An overview of the goodput health of your VMs.\n- **Workload Goodput Breakdown**: A detailed analysis of each goodput of your workloads.\n- **Badput Analysis**: An in-depth analysis of badput sources and their impact.\n- **Accelerator Type Analysis**: Goodput and Badput by accelerators.\n- **Detailed Time Series Data**: Raw time series data.\n- **Workload Hang Metrics**: Monitor Step Count, Step Time Deviation, Ideal Step Time, Disruption Count and Disruption Breakdown\n- **Rolling Window Metrics**: Monitor Rolling Window Goodput & Badput Breakdown\n\nFor more information about these metrics, see [Goodput and Badput Metrics](https://github.com/AI-Hypercomputer/ml-goodput-measurement/blob/main/README.md#access-metrics-on-google-cloud-monitoring) and [All Available Metrics](https://cloud.google.com/ai-hypercomputer/docs/monitor#available-metrics).",
             "format": "MARKDOWN",
             "style": {
               "backgroundColor": "#FFFFFF",
@@ -858,6 +858,7 @@
         "width": 48,
         "widget": {
           "title": "Workload Hang Monitoring",
+          "id": "",
           "sectionHeader": {
             "dividerBelow": false,
             "subtitle": "This section monitors Workload Hang metrics as a time series: Step Count, Step Time Deviation, Ideal Step Time, Disruption Count "
@@ -870,22 +871,31 @@
         "width": 48,
         "widget": {
           "title": "Maximum Step Count",
+          "id": "",
           "xyChart": {
             "chartOptions": {
               "displayHorizontal": false,
-              "mode": "COLOR"
+              "mode": "COLOR",
+              "showLegend": false
             },
             "dataSets": [
               {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
                 "plotType": "LINE",
                 "targetAxis": "Y1",
                 "timeSeriesQuery": {
-                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/max_productive_steps'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_max_productive_steps_aggregate:\n       aggregate(value.max_productive_steps)]"
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/max_productive_steps'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_max_productive_steps_aggregate:\n       aggregate(value.max_productive_steps)]",
+                  "unitOverride": ""
                 }
               }
             ],
             "thresholds": [],
             "yAxis": {
+              "label": "",
               "scale": "LINEAR"
             }
           }
@@ -897,22 +907,31 @@
         "width": 48,
         "widget": {
           "title": "Step Time Deviation",
+          "id": "",
           "xyChart": {
             "chartOptions": {
               "displayHorizontal": false,
-              "mode": "COLOR"
+              "mode": "COLOR",
+              "showLegend": false
             },
             "dataSets": [
               {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
                 "plotType": "LINE",
                 "targetAxis": "Y1",
                 "timeSeriesQuery": {
-                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/step_time_deviation'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_step_time_deviation_aggregate: aggregate(value.step_time_deviation)]"
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/step_time_deviation'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_step_time_deviation_aggregate: aggregate(value.step_time_deviation)]",
+                  "unitOverride": ""
                 }
               }
             ],
             "thresholds": [],
             "yAxis": {
+              "label": "",
               "scale": "LINEAR"
             }
           }
@@ -924,22 +943,31 @@
         "width": 48,
         "widget": {
           "title": "Ideal Step Time",
+          "id": "",
           "xyChart": {
             "chartOptions": {
               "displayHorizontal": false,
-              "mode": "COLOR"
+              "mode": "COLOR",
+              "showLegend": false
             },
             "dataSets": [
               {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
                 "plotType": "LINE",
                 "targetAxis": "Y1",
                 "timeSeriesQuery": {
-                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/performance'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_performance_aggregate: aggregate(value.performance)]"
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/performance'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id],\n    [value_performance_aggregate: aggregate(value.performance)]",
+                  "unitOverride": ""
                 }
               }
             ],
             "thresholds": [],
             "yAxis": {
+              "label": "",
               "scale": "LINEAR"
             }
           }
@@ -951,6 +979,7 @@
         "width": 48,
         "widget": {
           "title": "Disruption Information",
+          "id": "",
           "sectionHeader": {
             "dividerBelow": false,
             "subtitle": "This section monitors workload disruption metrics "
@@ -963,22 +992,31 @@
         "width": 25,
         "widget": {
           "title": "Disruption Count Per Workload",
+          "id": "",
           "xyChart": {
             "chartOptions": {
               "displayHorizontal": false,
-              "mode": "COLOR"
+              "mode": "COLOR",
+              "showLegend": false
             },
             "dataSets": [
               {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
                 "plotType": "LINE",
                 "targetAxis": "Y1",
                 "timeSeriesQuery": {
-                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/disruptions'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id, metric.window_type],\n    [value_disruptions_aggregate: aggregate(value.disruptions)]"
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/disruptions'\n| align next_older(1m)\n| every 1m\n| group_by [resource.workload_id, metric.window_type],\n    [value_disruptions_aggregate: aggregate(value.disruptions)]",
+                  "unitOverride": ""
                 }
               }
             ],
             "thresholds": [],
             "yAxis": {
+              "label": "",
               "scale": "LINEAR"
             }
           }
@@ -991,17 +1029,260 @@
         "width": 23,
         "widget": {
           "title": "Disruption Badput Breakdown",
+          "id": "",
           "pieChart": {
             "chartType": "DONUT",
             "dataSets": [
               {
-                "minAlignmentPeriod": "60s",
+                "breakdowns": [],
+                "dimensions": [],
+                "measures": [],
+                "sliceNameTemplate": "",
                 "timeSeriesQuery": {
                   "outputFullDuration": false,
-                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/badput_time'\n| filter metric.badput_source = 'INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION' || metric.badput_source = 'WASTED_PROGRESS_FROM_DISRUPTION'\n| align next_older(1m)\n| every 1m\n| group_by [metric.badput_source],\n    [value_badput_time_aggregate: aggregate(value.badput_time)]"
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/badput_time'\n| filter metric.badput_source = 'INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION' || metric.badput_source = 'WASTED_PROGRESS_FROM_DISRUPTION'\n| align next_older(1m)\n| every 1m\n| group_by [metric.badput_source],\n    [value_badput_time_aggregate: aggregate(value.badput_time)]",
+                  "unitOverride": ""
                 }
               }
-            ]
+            ],
+            "showLabels": false,
+            "showTotal": false,
+            "sliceAggregatedThreshold": 0
+          }
+        }
+      },
+      {
+        "yPos": 275,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Rolling Window Metrics",
+          "id": "",
+          "sectionHeader": {
+            "dividerBelow": true,
+            "subtitle": "Monitor 1d, 3d, 5d Rolling Window Metrics"
+          }
+        }
+      },
+      {
+        "yPos": 279,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Rolling Window Goodput [1d]",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/interval_goodput'\n| filter (metric.rolling_window_size == 86400)\n| every 1m\n| group_by [metric.accelerator_type, metric.goodput_source],\n    [value_interval_goodput_mean: mean(value.interval_goodput)]",
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "timeshiftDuration": "3600s",
+            "yAxis": {
+              "label": "",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 295,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Rolling Window Badput [1d]",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/interval_badput'\n| filter (metric.rolling_window_size == 86400)\n| every 1m\n| group_by [metric.accelerator_type, metric.badput_source],\n    [value_interval_badput_mean: mean(value.interval_badput)]",
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "timeshiftDuration": "3600s",
+            "yAxis": {
+              "label": "",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 311,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Rolling Window Goodput [3d]",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/interval_goodput'\n| filter (metric.rolling_window_size == 259200)\n| every 1m\n| group_by [metric.accelerator_type, metric.goodput_source],\n    [value_interval_goodput_mean: mean(value.interval_goodput)]",
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "timeshiftDuration": "3600s",
+            "yAxis": {
+              "label": "",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 327,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Rolling Window Badput [3d]",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/interval_badput'\n| filter (metric.rolling_window_size == 259200)\n| every 1m\n| group_by [metric.accelerator_type, metric.badput_source],\n    [value_interval_badput_mean: mean(value.interval_badput)]",
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "timeshiftDuration": "3600s",
+            "yAxis": {
+              "label": "",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 343,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Rolling Window Goodput [5d]",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/interval_goodput'\n| filter (metric.rolling_window_size == 432000)\n| every 1m\n| group_by [metric.accelerator_type, metric.goodput_source],\n    [value_interval_goodput_mean: mean(value.interval_goodput)]",
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "timeshiftDuration": "3600s",
+            "yAxis": {
+              "label": "",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 359,
+        "height": 16,
+        "width": 48,
+        "widget": {
+          "title": "Rolling Window Badput [5d]",
+          "id": "",
+          "xyChart": {
+            "chartOptions": {
+              "displayHorizontal": false,
+              "mode": "COLOR",
+              "showLegend": false
+            },
+            "dataSets": [
+              {
+                "breakdowns": [],
+                "dimensions": [],
+                "legendTemplate": "",
+                "measures": [],
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "outputFullDuration": false,
+                  "timeSeriesQueryLanguage": "fetch compute.googleapis.com/Workload\n| metric 'compute.googleapis.com/workload/interval_badput'\n| filter (metric.rolling_window_size == 432000)\n| every 1m\n| group_by [metric.accelerator_type, metric.badput_source],\n    [value_interval_badput_mean: mean(value.interval_badput)]",
+                  "unitOverride": ""
+                }
+              }
+            ],
+            "thresholds": [],
+            "timeshiftDuration": "3600s",
+            "yAxis": {
+              "label": "",
+              "scale": "LINEAR"
+            }
           }
         }
       }

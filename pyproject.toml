@@ -14,7 +14,7 @@
 
 [project]
 name = "ml_goodput_measurement"
-version = "0.0.12"
+version = "0.0.13"
 authors = [
   { name="Cloud TPU Team", email="cloud-tpu-eng@google.com" },
 ]

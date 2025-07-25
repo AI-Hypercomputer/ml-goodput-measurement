@@ -20,6 +20,10 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   * Update the `[Unreleased]` url: `v1.0.0...HEAD` -> `v2.0.0...HEAD`
 
 -->
+## [0.0.13] - 2025-07-25
+
+* Fix occasional gaps in cumulative Goodput Monitor dashboard.
+
 ## [0.0.12] - 2025-06-25
 
 * Support monitoring disruption badput due to infrastructure recovery.
@@ -97,6 +101,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.0.13]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.12...v0.0.13
 [0.0.12]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.11...v0.0.12
 [0.0.11]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.8...v0.0.10

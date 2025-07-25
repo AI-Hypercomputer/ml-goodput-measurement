@@ -410,6 +410,18 @@ class BadputType(enum.Enum):
   detection of a planned disruption signal. The save operation in type of
   checkpointing is synchronous resulting in time lost to Badput.
 
+  > **_NOTE:_** This type of Badput is reported *only* when Orbax is used for
+     checkpointing and requires the Orbax structured logger to be configured.
+     To compute checkpointing Badput for other types of checkpointers (Non-Orbax),
+     please use the Custom Badput Recorder API (instructions in
+     [Record Custom Badput Events (e.g., Evaluation, SDC Checks)](#record-custom-badput-events-eg-evaluation-sdc-checks))
+     with an appropriate Custom Badput event type and wrap the blocking operation
+     around the `start` and the `stop` API calls.
+
+  > **_NOTE:_** Do **NOT** use the Custom Badput APIs for blocking checkpoint save
+     operations if you are using Orbax. Either use Orbax's structured checkpoint
+     logger **OR** the Custom Badput API for any other type of checkpointing.
+
  - Wasted Progress due to Disruption (WASTED_PROGRESS_FROM_DISRUPTION)
 
  Based on checkpointing frequency, a disruption may result in time lost in the

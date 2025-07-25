@@ -1174,7 +1174,10 @@ class GoodputCalculator:
         cached_last_entry_info = self._goodput_cache.get_last_entry_info()
         if cached_last_entry_info:
           cached_last_entry_ts, _ = cached_last_entry_info
-          if query_time <= cached_last_entry_ts:
+          if (
+              cached_last_entry_ts is not None
+              and query_time <= cached_last_entry_ts
+          ):
             return []
 
           new_entries, current_last_entry_info = (

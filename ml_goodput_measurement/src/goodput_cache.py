@@ -34,7 +34,8 @@ class GoodputCache:
   ):
     """Updated the cached entries."""
     self._cached_entries.extend(entries)
-    self.update_last_entry_info(last_entry_info)
+    if last_entry_info and last_entry_info[0] is not None:
+      self.update_last_entry_info(last_entry_info)
     self.update_job_start_time()
     self.update_job_end_time()
     new_step_entries = [entry for entry in entries if _STEP_START_TIME in entry]

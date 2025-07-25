@@ -100,7 +100,7 @@ class GCPMetrics:
       self.client.create_time_series(
           name=self.project_name, time_series=time_series_list
       )
-      logger.info("Sent %d metrics to GCP Monitoring.", len(metrics))
+      logger.info("Sent %d Goodput metrics to GCM Monitoring.", len(metrics))
 
     except GoogleAPIError as e:
-      logger.error("Failed to send metrics: %s", e)
+      logger.error("Failed to send Goodput metrics to GCM Monitoring: %s", e)

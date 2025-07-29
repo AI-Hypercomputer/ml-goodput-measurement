@@ -415,19 +415,34 @@ class GoodputMonitor:
             )
         )
       except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.error(
+        logger.warning(
             'Error while querying goodput. Skipping this cycle. Error: %s', e
         )
         continue
-      # Upload metrics to Tensorboard.
-      self._upload_goodput_metrics_to_tensorboard(
-          job_goodput, job_badput_breakdown, last_step
-      )
 
-      # Upload metrics to Google Cloud Monitoring.
-      if self._gcp_options.enable_gcp_goodput_metrics:
-        self._upload_goodput_metrics_to_gcm(
-            self._goodput_calculator.get_job_goodput_details()
+      try:
+        # Upload metrics to Tensorboard.
+        self._upload_goodput_metrics_to_tensorboard(
+            job_goodput, job_badput_breakdown, last_step
+        )
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning(
+            'Could not upload goodput metrics to Tensorboard. Skipping'
+            ' this cycle. Error: %s',
+            e,
+        )
+
+      try:
+        # Upload metrics to Google Cloud Monitoring.
+        if self._gcp_options.enable_gcp_goodput_metrics:
+          self._upload_goodput_metrics_to_gcm(
+              self._goodput_calculator.get_job_goodput_details()
+          )
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning(
+            'Could not upload goodput metrics to Google Cloud Monitoring.'
+            ' Skipping this cycle. Error: %s',
+            e,
         )
 
   def _final_goodput_query_and_upload(self):
@@ -756,17 +771,24 @@ class GoodputMonitor:
       if not self._gcp_options.enable_gcp_goodput_metrics:
         continue
 
-      now = datetime.datetime.now(datetime.timezone.utc)
-      for window_size in self._rolling_windows:
-        window_end = now
-        window_start = now - datetime.timedelta(seconds=window_size)
-        window_start = window_start.replace(tzinfo=datetime.timezone.utc)
-        interval_metric_details = (
-            self._goodput_calculator.get_interval_metric_details(
-                window_start, window_end
-            )
+      try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for window_size in self._rolling_windows:
+          window_end = now
+          window_start = now - datetime.timedelta(seconds=window_size)
+          window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+          interval_metric_details = (
+              self._goodput_calculator.get_interval_metric_details(
+                  window_start, window_end
+              )
+          )
+          self._upload_interval_goodput_metrics_to_gcm(interval_metric_details)
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning(
+            'Error while querying and uploading rolling window goodput to GCM.'
+            'Skipping this cycle. This will not impact the workload. Error: %s',
+            e,
         )
-        self._upload_interval_goodput_metrics_to_gcm(interval_metric_details)
 
   def start_rolling_window_goodput_uploader(
       self, rolling_windows_seconds: list[int]

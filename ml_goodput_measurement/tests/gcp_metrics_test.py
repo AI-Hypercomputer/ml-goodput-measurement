@@ -72,8 +72,9 @@ class GCPMetricsTest(absltest.TestCase):
           time_series.points[0].value.distribution_value, value
       )
 
+  @patch(f"{gcp_metrics.__name__}.logger")
   @patch("time.time")
-  def test_send_metrics(self, mock_time):
+  def test_send_metrics(self, mock_time, mock_logger):
     # Set a fixed return value for the mocked time.time()
     mock_time.return_value = 1677347200.5
 
@@ -94,8 +95,8 @@ class GCPMetricsTest(absltest.TestCase):
             "resource_labels": {"loc": "eu"},
         },
     ]
-
-    self.metrics_sender.send_metrics(metrics_to_send)
+    log_context = {"job_name": "test-job", "pid": 12345}
+    self.metrics_sender.send_metrics(metrics_to_send, context=log_context)
 
     # Verify that create_time_series was called with the correct arguments
     expected_name = f"projects/{self.project_id}"
@@ -125,6 +126,16 @@ class GCPMetricsTest(absltest.TestCase):
       self.assertEqual(actual.resource.type, expected.resource.type)
       self.assertEqual(actual.resource.labels, expected.resource.labels)
       self.assertEqual(actual.metric.labels, expected.metric.labels)
+
+    mock_logger.info.assert_called_once()
+    expected_log_payload = {
+        "message": "Sent Goodput metrics to GCM Monitoring.",
+        "metrics_count": 2,
+        "job_name": "test-job",
+        "pid": 12345,
+    }
+    actual_log_payload = mock_logger.info.call_args.args[0]
+    self.assertEqual(actual_log_payload, expected_log_payload)
 
   @patch("cloud_goodput.ml_goodput_measurement.src.gcp_metrics.logger.error")
   def test_send_metrics_failure(self, mock_logging_error):

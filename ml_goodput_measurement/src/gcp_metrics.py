@@ -61,7 +61,9 @@ class GCPMetrics:
 
     return series
 
-  def send_metrics(self, metrics: list[Dict[str, Any]]):
+  def send_metrics(
+      self, metrics: list[Dict[str, Any]], context: Dict[str, Any] | None = None
+  ):
     """Sends multiple metrics to GCP Monitoring in a batch with dynamic resources.
 
     Args:
@@ -75,12 +77,12 @@ class GCPMetrics:
                  - 'resource_type': str
                  - 'resource_labels': dict
     """
+    time_series_list = []
     try:
       now = time.time()
       seconds = int(now)
       nanos = int((now - seconds) * 10**9)
 
-      time_series_list = []
       for metric in metrics:
         try:
           metric_labels = metric.get("metric_labels", {})
@@ -96,11 +98,29 @@ class GCPMetrics:
           )
           time_series_list.append(series)
         except Exception as e:  # pylint: disable=broad-exception-caught
-          logger.error("Failed to create time series: %s", e)
+          logger.error(
+              "Failed to create time series for metric '%s': %s",
+              metric.get("metric_type", "UNKNOWN"),
+              e,
+          )
+
+      if not time_series_list:
+        logger.warning(
+            "No valid time series were created, skipping GCM upload."
+        )
+        return
+
       self.client.create_time_series(
           name=self.project_name, time_series=time_series_list
       )
-      logger.info("Sent %d Goodput metrics to GCM Monitoring.", len(metrics))
+      log_data = {
+          "message": "Sent Goodput metrics to GCM Monitoring.",
+          "metrics_count": len(time_series_list),
+      }
+      if context:
+        log_data.update(context)
+
+      logger.info(log_data)
 
     except GoogleAPIError as e:
       logger.error("Failed to send Goodput metrics to GCM Monitoring: %s", e)

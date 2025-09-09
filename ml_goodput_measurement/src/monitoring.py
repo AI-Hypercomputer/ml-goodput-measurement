@@ -451,7 +451,13 @@ def _upload_goodput_metrics_to_gcm(
 
     # Send metrics to Google Cloud Monitoring.
     if metrics_sender and gcm_metrics:
-      metrics_sender.send_metrics(gcm_metrics)
+      log_context = {
+          'job_name': config.get('job_name', 'unknown-job'),
+          'pid': os.getpid(),
+          'worker': multiprocessing.current_process().name,
+          'metrics_type': 'cumulative',
+      }
+      metrics_sender.send_metrics(gcm_metrics, context=log_context)
 
   except Exception as e:  # pylint: disable=broad-exception-caught
     logger.error(
@@ -502,7 +508,13 @@ def _send_step_deviation_metric_to_gcp(
         },
     }]
     if metrics_sender:
-      metrics_sender.send_metrics(perf_metric)
+      log_context = {
+          'job_name': config.get('job_name', 'unknown-job'),
+          'pid': os.getpid(),
+          'worker': multiprocessing.current_process().name,
+          'metrics_type': 'step-time-deviation',
+      }
+      metrics_sender.send_metrics(perf_metric, context=log_context)
   except Exception as e:  # pylint: disable=broad-exception-caught
     logger.error('Error sending step deviation to GCM: %s', e)
 
@@ -585,7 +597,14 @@ def _upload_interval_goodput_metrics_to_gcm(
       })
 
     if metrics_sender and gcm_metrics:
-      metrics_sender.send_metrics(gcm_metrics)
+      log_context = {
+          'job_name': config.get('job_name', 'unknown-job'),
+          'pid': os.getpid(),
+          'worker': multiprocessing.current_process().name,
+          'metrics_type': 'rolling-window',
+          'window_size': str(window_size),
+      }
+      metrics_sender.send_metrics(gcm_metrics, context=log_context)
 
   except Exception as e:  # pylint: disable=broad-exception-caught
     logger.error(

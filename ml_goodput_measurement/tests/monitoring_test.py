@@ -114,13 +114,71 @@ class GoodputMonitorTests(absltest.TestCase):
     self.assertIs(goodput_monitor._writer, mock_summary_writer.return_value)
     self.assertIsNotNone(goodput_monitor._goodput_calculator)
 
-    # Thread events should be initialized correctly.
+    # Process management events should be initialized correctly.
     self.assertIsNotNone(goodput_monitor._step_deviation_termination_event)
     self.assertFalse(goodput_monitor._step_deviation_termination_event.is_set())
-    self.assertFalse(goodput_monitor._step_deviation_uploader_thread_running)
-    self.assertIsNotNone(goodput_monitor._termination_event)
-    self.assertFalse(goodput_monitor._termination_event.is_set())
-    self.assertFalse(goodput_monitor._goodput_uploader_thread_running)
+    self.assertIsNone(goodput_monitor._step_deviation_process)
+    self.assertIsNotNone(goodput_monitor._goodput_termination_event)
+    self.assertFalse(goodput_monitor._goodput_termination_event.is_set())
+    self.assertIsNone(goodput_monitor._goodput_process)
+
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'
+  )
+  @patch('multiprocessing.Event')
+  @patch('multiprocessing.Process')
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_multiprocess_goodput_monitor_start_and_stop(
+      self,
+      mock_logger_client,
+      mock_summary_writer,
+      mock_process,
+      mock_event,
+      mock_final_goodput_upload,
+  ):
+    mock_process_instance = mock_process.return_value
+    mock_process_instance.is_alive.return_value = True
+
+    mock_goodput_event = MagicMock()
+    mock_step_deviation_event = MagicMock()
+    mock_rolling_window_event = MagicMock()
+    mock_event.side_effect = [
+        mock_goodput_event,
+        mock_step_deviation_event,
+        mock_rolling_window_event,
+    ]
+
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+
+    goodput_monitor = monitoring.GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+    )
+
+    goodput_monitor.start_goodput_uploader()
+    mock_process.assert_called_once_with(
+        target=monitoring._goodput_worker,
+        args=(
+            goodput_monitor._worker_config,
+            mock_goodput_event,
+        ),
+        daemon=True,
+    )
+    mock_process_instance.start.assert_called_once()
+    mock_goodput_event.clear.assert_called_once()
+    goodput_monitor.stop_goodput_uploader()
+    mock_goodput_event.set.assert_called_once()
+    mock_process_instance.join.assert_any_call(timeout=10.0)
+
+    mock_process_instance.terminate.assert_called_once()
+    self.assertEqual(mock_process_instance.join.call_count, 2)
+    mock_final_goodput_upload.assert_called_once()
+    self.assertIsNone(goodput_monitor._goodput_process)
 
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._write_goodput_to_tensorboard'
@@ -141,15 +199,13 @@ class GoodputMonitorTests(absltest.TestCase):
         monitoring_enabled=True,
     )
     goodput_monitor.start_goodput_uploader()
-    self.assertTrue(goodput_monitor._uploader_thread_running)
-    self.assertIsNotNone(goodput_monitor._goodput_upload_thread)
-    self.assertFalse(goodput_monitor._termination_event.is_set())
+    self.assertIsNotNone(goodput_monitor._goodput_process)
+    self.assertFalse(goodput_monitor._goodput_termination_event.is_set())
     mock_goodput_to_tensorboard.assert_called_once()
     mock_summary_writer.return_value.add_scalar.assert_called_once()
     goodput_monitor.stop_goodput_uploader()
-    self.assertFalse(goodput_monitor._uploader_thread_running)
-    self.assertIsNone(goodput_monitor._goodput_upload_thread)
-    self.assertTrue(goodput_monitor._termination_event.is_set())
+    self.assertIsNone(goodput_monitor._goodput_process)
+    self.assertTrue(goodput_monitor._goodput_termination_event.is_set())
 
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._write_goodput_to_tensorboard'
@@ -170,17 +226,17 @@ class GoodputMonitorTests(absltest.TestCase):
         monitoring_enabled=True,
     )
     goodput_monitor.start_goodput_uploader()
-    self.assertTrue(goodput_monitor._uploader_thread_running)
-    self.assertIsNotNone(goodput_monitor._goodput_upload_thread)
-    self.assertFalse(goodput_monitor._termination_event.is_set())
+    self.assertIsNotNone(goodput_monitor._goodput_process)
+    self.assertTrue(goodput_monitor._goodput_process.is_alive())
+    self.assertFalse(goodput_monitor._goodput_termination_event.is_set())
     mock_goodput_to_tensorboard.assert_called_once()
     with self.assertRaisesRegex(ValueError, 'Test Error'):
       goodput_monitor._query_and_upload_goodput()
     mock_summary_writer.return_value.add_scalar.assert_not_called()
     goodput_monitor.stop_goodput_uploader()
-    self.assertFalse(goodput_monitor._uploader_thread_running)
-    self.assertIsNone(goodput_monitor._goodput_upload_thread)
-    self.assertTrue(goodput_monitor._termination_event.is_set())
+    self.assertIsNone(goodput_monitor._goodput_process)
+    self.assertFalse(goodput_monitor._goodput_process.is_alive())
+    self.assertTrue(goodput_monitor._goodput_termination_event.is_set())
 
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._write_badput_to_tensorboard'
@@ -203,18 +259,18 @@ class GoodputMonitorTests(absltest.TestCase):
     )
 
     goodput_monitor.start_goodput_uploader()
-    self.assertTrue(goodput_monitor._uploader_thread_running)
-    self.assertIsNotNone(goodput_monitor._goodput_upload_thread)
-    self.assertFalse(goodput_monitor._termination_event.is_set())
+    self.assertIsNotNone(goodput_monitor._goodput_process)
+    self.assertTrue(goodput_monitor._goodput_process.is_alive())
+    self.assertFalse(goodput_monitor._goodput_termination_event.is_set())
     self.assertTrue(goodput_monitor._include_badput_breakdown)
 
     mock_badput_to_tensorboard.assert_called_once()
     mock_summary_writer.return_value.add_scalar.assert_called_once()
 
     goodput_monitor.stop_goodput_uploader()
-    self.assertFalse(goodput_monitor._uploader_thread_running)
-    self.assertIsNone(goodput_monitor._goodput_upload_thread)
-    self.assertTrue(goodput_monitor._termination_event.is_set())
+    self.assertFalse(goodput_monitor._goodput_process.is_alive())
+    self.assertIsNone(goodput_monitor._goodput_process)
+    self.assertTrue(goodput_monitor._goodput_termination_event.is_set())
 
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._write_step_deviation_to_tensorboard'
@@ -239,14 +295,14 @@ class GoodputMonitorTests(absltest.TestCase):
         include_step_deviation=True,
     )
     goodput_monitor.start_step_deviation_uploader()
-    self.assertTrue(goodput_monitor._step_deviation_uploader_thread_running)
-    self.assertIsNotNone(goodput_monitor._step_deviation_upload_thread)
+    self.assertTrue(goodput_monitor._step_deviation_process.is_alive())
+    self.assertIsNotNone(goodput_monitor._step_deviation_process)
     self.assertFalse(goodput_monitor._step_deviation_termination_event.is_set())
     mock_step_deviation_to_tensorboard.assert_called_once()
     mock_summary_writer.return_value.add_scalar.assert_called_once()
     goodput_monitor.stop_step_deviation_uploader()
-    self.assertFalse(goodput_monitor._step_deviation_uploader_thread_running)
-    self.assertIsNone(goodput_monitor._step_deviation_upload_thread)
+    self.assertFalse(goodput_monitor._step_deviation_process.is_alive())
+    self.assertIsNone(goodput_monitor._step_deviation_process)
     self.assertTrue(goodput_monitor._step_deviation_termination_event.is_set())
 
   @patch(
@@ -272,16 +328,16 @@ class GoodputMonitorTests(absltest.TestCase):
         include_step_deviation=True,
     )
     goodput_monitor.start_step_deviation_uploader()
-    self.assertTrue(goodput_monitor._step_deviation_uploader_thread_running)
-    self.assertIsNotNone(goodput_monitor._step_deviation_upload_thread)
+    self.assertTrue(goodput_monitor._step_deviation_process.is_alive())
+    self.assertIsNotNone(goodput_monitor._step_deviation_process)
     self.assertFalse(goodput_monitor._step_deviation_termination_event.is_set())
     mock_query_and_upload_step_deviation.assert_called_once()
     with self.assertRaisesRegex(ValueError, 'Test Error'):
       goodput_monitor._query_and_upload_step_deviation()
     mock_summary_writer.return_value.add_scalar.assert_not_called()
     goodput_monitor.stop_step_deviation_uploader()
-    self.assertFalse(goodput_monitor._step_deviation_uploader_thread_running)
-    self.assertIsNone(goodput_monitor._step_deviation_upload_thread)
+    self.assertFalse(goodput_monitor._step_deviation_process.is_alive())
+    self.assertIsNone(goodput_monitor._step_deviation_process)
     self.assertTrue(goodput_monitor._step_deviation_termination_event.is_set())
 
   @patch('google.cloud.monitoring_v3.MetricServiceClient')
@@ -337,8 +393,11 @@ class GoodputMonitorTests(absltest.TestCase):
         }
     )
 
-    goodput_monitor._upload_goodput_metrics_to_gcm(
-        goodput_monitor._goodput_calculator.get_job_goodput_details()
+    details = goodput_monitor._goodput_calculator.get_job_goodput_details()
+    monitoring._upload_goodput_metrics_to_gcm(
+        goodput_monitor._metrics_sender,
+        details,
+        goodput_monitor._worker_config,
     )
 
     expected_calls = [
@@ -510,8 +569,11 @@ class GoodputMonitorTests(absltest.TestCase):
         }
     )
 
-    goodput_monitor._upload_goodput_metrics_to_gcm(
-        goodput_monitor._goodput_calculator.get_job_goodput_details()
+    details = goodput_monitor._goodput_calculator.get_job_goodput_details()
+    monitoring._upload_goodput_metrics_to_gcm(
+        goodput_monitor._metrics_sender,
+        details,
+        goodput_monitor._worker_config
     )
 
     # Verify that create_time_series was called, even if it raised an exception
@@ -574,8 +636,11 @@ class GoodputMonitorTests(absltest.TestCase):
         }
     )
 
-    goodput_monitor._upload_goodput_metrics_to_gcm(
-        goodput_monitor._goodput_calculator.get_job_goodput_details()
+    details = goodput_monitor._goodput_calculator.get_job_goodput_details()
+    monitoring._upload_goodput_metrics_to_gcm(
+        goodput_monitor._metrics_sender,
+        details,
+        goodput_monitor._worker_config
     )
 
     # Verify that create_time_series was called with the correct data,
@@ -749,8 +814,11 @@ class GoodputMonitorTests(absltest.TestCase):
         }
     )
 
-    goodput_monitor._upload_interval_goodput_metrics_to_gcm(
-        goodput_monitor._goodput_calculator.get_interval_metric_details()
+    details = goodput_monitor._goodput_calculator.get_interval_metric_details()
+    monitoring._upload_interval_goodput_metrics_to_gcm(
+        goodput_monitor._metrics_sender,
+        details,
+        goodput_monitor._worker_config
     )
 
     expected_calls = [
@@ -865,8 +933,11 @@ class GoodputMonitorTests(absltest.TestCase):
         }
     )
 
-    goodput_monitor._upload_goodput_metrics_to_gcm(
-        goodput_monitor._goodput_calculator.get_job_goodput_details()
+    details = goodput_monitor._goodput_calculator.get_job_goodput_details()
+    monitoring._upload_goodput_metrics_to_gcm(
+        goodput_monitor._metrics_sender,
+        details,
+        goodput_monitor._worker_config
     )
 
     expected_calls = [

@@ -559,11 +559,11 @@ goodput_monitor = monitoring.GoodputMonitor(
 
 ### Monitor Cumulative Goodput Metrics
 
-#### Start asynchronous "query and upload" of Goodput
+#### Start Asynchronous "Query and Upload" of Goodput
 
-Call the `start_goodput_uploader` API to spin off a thread which continuously
-queries and uploads cumulative Goodput metrics to Tensorboard & Google Cloud
-Monitoring.
+Call the `start_goodput_uploader` API to launch a background process which
+continuously queries and uploads cumulative Goodput metrics to Tensorboard
+& Google Cloud Monitoring.
 
 > **_NOTE:_** This will upload computed metrics to Google Cloud Monitoring
 by default.
@@ -587,7 +587,7 @@ goodput_monitor.start_goodput_uploader()
 Call the `stop_goodput_uploader` API to perform a final upload of all metrics
 and safely exit.
 
-> **_NOTE:_** This will stop all cumulative metrics upload threads.
+> **_NOTE:_** This will stop all cumulative metrics upload processes.
 
 ```python
 goodput_monitor.stop_goodput_uploader()
@@ -598,7 +598,7 @@ goodput_monitor.stop_goodput_uploader()
 #### Start asynchronous "query and upload" of Rolling Window Goodput
 
 Call the `start_rolling_window_goodput_uploader` API to start a background
-thread that continuously queries and uploads **rolling window goodput metrics**
+process that continuously queries and uploads **rolling window goodput metrics**
 to Google Cloud Monitoring.
 
 You must provide a list of window durations in seconds (e.g., `[60, 300, 900]`
@@ -616,9 +616,9 @@ goodput_monitor.start_rolling_window_goodput_uploader(rolling_windows_seconds=[6
 #### Stop the Rolling Window Goodput Uploader
 
 Call the `stop_rolling_window_goodput_uploader` API to perform a final upload
-of rolling window metrics and safely shut down the background uploader thread.
+of rolling window metrics and safely shut down the background uploader process.
 
-> **_NOTE:_** This will stop all rolling window metrics upload threads.
+> **_NOTE:_** This will stop all rolling window metrics upload processes.
 
 ```python
 goodput_monitor.stop_rolling_window_goodput_uploader()

@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 import enum
 import logging
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, TypedDict, Union
 
 import numpy as np
 import requests
@@ -56,6 +56,7 @@ class MetricType(enum.Enum):
   DISRUPTION_COUNT = 'disruption_count'
   STEP_TIME_DEVIATION = 'step_time_deviation'
   IDEAL_STEP_TIME = 'ideal_step_time'
+  TOTAL_EXCLUDED_TIME = 'total_excluded_time'
 
 
 # Interval metric types for upload and monitoring.
@@ -99,6 +100,7 @@ class WorkloadMetricDetails(TypedDict):
   disruption_count: int
   step_time_deviation: dict[int, float]
   ideal_step_time: float
+  total_excluded_time: float
 
 
 class IntervalWorkloadMetricDetails(TypedDict):
@@ -133,13 +135,16 @@ class GoodputInfo:
       self,
       total_productive_time: float = 0.0,
       total_elapsed_time: float = 0.0,
-      total_unproductive_time: Optional[dict[BadputType, float]] = None,
+      total_unproductive_time: Optional[
+          dict[BadputType, Union[float, dict[str, float]]]
+      ] = None,
       max_productive_step: int = 0,
       last_recorded_step: int = 0,
       last_updated_timestamp: datetime.datetime = datetime.datetime.now(
           datetime.timezone.utc
       ),
       number_of_disruptions: int = 0,
+      total_excluded_time: float = 0.0,
   ):
     self.total_productive_time = total_productive_time
     self.total_elapsed_time = total_elapsed_time
@@ -158,6 +163,7 @@ class GoodputInfo:
     self.last_recorded_step = last_recorded_step
     self.last_updated_timestamp = last_updated_timestamp
     self.number_of_disruptions = number_of_disruptions
+    self.total_excluded_time = total_excluded_time
 
 
 class StepInfo:

@@ -2209,5 +2209,269 @@ class GoodputStepDeviationConcurrencyTest(googletest.TestCase):
       t.join()
     self.assertEmpty(errors, msg=f'Errors occurred in concurrent threads: {errors}')
 
+
+class GoodputExclusionIntegrationTest(googletest.TestCase):
+  """Integration tests for the Goodput Exclusion API."""
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = 'test-exclusion-run'
+    self.logger_name = 'test-exclusion-log'
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput.GoodputRecorder(
+        self.job_name,
+        self.logger_name,
+        True,
+        self.mock_cloud_logger,
+    )
+    self.goodput_calculator = goodput.GoodputCalculator(
+        self.job_name, self.logger_name, self.mock_cloud_logger
+    )
+
+  def _mock_sample_program_with_badput(self, start_time):
+    """Mocks a standard program with TPU Init, Data Loading, and Badput events."""
+    mock_current_time = start_time
+    delay = datetime.timedelta(seconds=1)
+
+    self.goodput_recorder.record_job_start_time(mock_current_time)
+
+    # TPU Init
+    mock_current_time += delay
+    self.goodput_recorder.record_tpu_init_start_time(mock_current_time)
+    mock_current_time += _TEST_TPU_INIT_TIME
+    self.goodput_recorder.record_tpu_init_end_time(mock_current_time)
+
+    # Training Prep
+    mock_current_time += delay
+    self.goodput_recorder.record_training_preparation_start_time(
+        mock_current_time
+    )
+    mock_current_time += _TEST_TRAINING_PREPARATION_TIME
+    self.goodput_recorder.record_training_preparation_end_time(
+        mock_current_time
+    )
+
+    # Data Loading
+    mock_current_time += delay
+    self.goodput_recorder.record_data_loading_start_time(mock_current_time)
+    mock_current_time += _TEST_DATA_LOADING_TIME
+    self.goodput_recorder.record_data_loading_end_time(mock_current_time)
+
+    # 5 Steps of Training
+    mock_current_time += delay
+    custom_badput_event_frequency = 3
+    for step in range(_TEST_TOTAL_STEPS):
+      step_start_time = mock_current_time
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+
+      # Data Loading
+      self.goodput_recorder.record_data_loading_start_time(mock_current_time)
+      mock_current_time += _TEST_DATA_LOADING_TIME
+      self.goodput_recorder.record_data_loading_end_time(mock_current_time)
+
+      # Custom Badput
+      if step % custom_badput_event_frequency == 0:
+        self.goodput_recorder.record_custom_badput_event_start_time(
+            mock_current_time, 'test_sync'
+        )
+        mock_current_time += _TEST_CUSTOM_BADPUT_TIME
+        self.goodput_recorder.record_custom_badput_event_end_time(
+            mock_current_time, 'test_sync'
+        )
+
+      mock_current_time += _TEST_STEP_TIME
+
+    self.goodput_recorder.record_job_end_time(mock_current_time)
+
+  def test_basic_exclusion_reduces_productive_time(self):
+    """Verifies that excluding a productive interval reduces Goodput."""
+    job_start_time = datetime.datetime(
+        2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    step_start = job_start_time + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_step_start_time(0, step_start)
+    exclusion_start = step_start
+
+    step_start += datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_step_start_time(1, step_start)
+
+    job_end = step_start + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    exclusion_end = exclusion_start + datetime.timedelta(seconds=5)
+    exclusions = [(exclusion_start, exclusion_end)]
+
+    goodput_pct, breakdown, _, excluded_time = (
+        self.goodput_calculator.get_job_goodput_with_exclusions(
+            exclusions, include_badput_breakdown=True
+        )
+    )
+
+    self.assertEqual(excluded_time, 5.0)
+    self.assertAlmostEqual(goodput_pct, 60.0)
+
+    self.assertAlmostEqual(breakdown[BadputType.OTHER], 40.0)
+
+  def test_exclusion_masking_badput_event(self):
+    """Verifies that excluding a Badput event (TPU Init) removes it from breakdown."""
+    job_start_time = datetime.datetime(
+        2025, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    # TPU Init: 10s
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    tpu_end = job_start_time + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_tpu_init_end_time(tpu_end)
+
+    # Gap (Other Badput): 10s -> 20s
+    step_start = tpu_end + datetime.timedelta(seconds=10)
+
+    self.goodput_recorder.record_step_start_time(0, step_start)
+    # Job End: 25s after job start.
+    job_end = step_start + datetime.timedelta(seconds=5)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    exclusions = [(job_start_time, tpu_end)]
+
+    _, breakdown, _, excluded_time = (
+        self.goodput_calculator.get_job_goodput_with_exclusions(
+            exclusions, include_badput_breakdown=True
+        )
+    )
+
+    self.assertEqual(excluded_time, 10.0)
+
+    # TPU Init Badput should now be 0.0 because it was fully excluded
+    self.assertEqual(breakdown[BadputType.TPU_INITIALIZATION], 0.0)
+
+    # Adjusted Total Time = 15s (Total Time - Excluded Time = 25s - 10s)
+    # Productive Time = 5s (Step Start 20s -> Job End 25s)
+    # Unexcluded Gap: "Other" Badput = Step Start (20s) - TPU End (10s) = 10s.
+    # Expected Other Badput = Other Badput / Adjusted Total Time * 100 = 66.66%
+    self.assertAlmostEqual(breakdown[BadputType.OTHER], 66.66, delta=0.1)
+
+  def test_exclusion_with_multiple_steps_and_badput(self):
+    """Verifies exclusion works correctly with multiple steps and custom badput."""
+    job_start_time = datetime.datetime(
+        2025, 1, 1, 14, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self._mock_sample_program_with_badput(job_start_time)
+
+    entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
+
+    custom_start = None
+    custom_end = None
+
+    for entry in entries:
+      if entry.get(goodput._CUSTOM_BADPUT_EVENT_TYPE) == 'test_sync':
+        if goodput._CUSTOM_BADPUT_EVENT_START_TIME in entry:
+          custom_start = datetime.datetime.fromtimestamp(
+              entry[goodput._CUSTOM_BADPUT_EVENT_START_TIME],
+              tz=datetime.timezone.utc,
+          )
+        elif goodput._CUSTOM_BADPUT_EVENT_END_TIME in entry:
+          custom_end = datetime.datetime.fromtimestamp(
+              entry[goodput._CUSTOM_BADPUT_EVENT_END_TIME],
+              tz=datetime.timezone.utc,
+          )
+          break
+
+    self.assertIsNotNone(custom_start)
+    self.assertIsNotNone(custom_end)
+
+    # Exclude this custom badput event
+    exclusions = [(custom_start, custom_end)]
+
+    _, _, _, excluded_time = (
+        self.goodput_calculator.get_job_goodput_with_exclusions(
+            exclusions, include_badput_breakdown=True
+        )
+    )
+
+    # Verify exclusion matches the custom badput time (10s)
+    self.assertEqual(excluded_time, _TEST_CUSTOM_BADPUT_TIME.total_seconds())
+
+  def test_exclusion_during_disruption_recovery(self):
+    """Verifies that excluding the disruption gap removes Infrastructure Recovery badput."""
+    job_start_time = datetime.datetime(
+        2025, 1, 1, 16, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    self.goodput_recorder.record_step_start_time(0, job_start_time)
+
+    restart_time = job_start_time + datetime.timedelta(seconds=20)
+    self.goodput_recorder.record_job_start_time(restart_time)
+    self.goodput_recorder.record_step_start_time(0, restart_time)
+    self.goodput_recorder.record_job_end_time(
+        job_start_time + datetime.timedelta(seconds=30)
+    )
+
+    _, badput_breakdown, _, _ = (
+        self.goodput_calculator.get_job_goodput_with_exclusions(
+            [], include_badput_breakdown=True
+        )
+    )
+    self.assertGreater(
+        badput_breakdown.get(
+            BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION, 0.0
+        ),
+        0.0,
+    )
+    exclusions = [(job_start_time, restart_time)]
+
+    _, breakdown, _, excluded_time = (
+        self.goodput_calculator.get_job_goodput_with_exclusions(
+            exclusions, include_badput_breakdown=True
+        )
+    )
+
+    self.assertEqual(excluded_time, 20.0)
+
+    # Infrastructure Recovery Badput should now be 0.0 since it was excluded.
+    self.assertEqual(
+        breakdown.get(BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION, 0.0),
+        0.0,
+    )
+
+  def test_exclusion_masking_training_prep(self):
+    """Verifies training prep badput is correctly adjusted when excluded."""
+    job_start_time = datetime.datetime(
+        2025, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    self.goodput_recorder.record_training_preparation_start_time(job_start_time)
+    prep_end = job_start_time + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_training_preparation_end_time(prep_end)
+
+    step_start = job_start_time + datetime.timedelta(seconds=20)
+    self.goodput_recorder.record_step_start_time(0, step_start)
+
+    job_end = job_start_time + datetime.timedelta(seconds=25)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    # Exclusion: 5s -> 15s (Overlaps last 5s of Prep + first 5s of gap)
+    exclusion_start = job_start_time + datetime.timedelta(seconds=5)
+    exclusion_end = job_start_time + datetime.timedelta(seconds=15)
+    exclusions = [(exclusion_start, exclusion_end)]
+
+    _, breakdown, _, excluded_time = (
+        self.goodput_calculator.get_job_goodput_with_exclusions(
+            exclusions, include_badput_breakdown=True
+        )
+    )
+
+    # Overlap of 5s with training prep.
+    self.assertEqual(excluded_time, 5.0)
+
+    # Adjusted training prep badput: 5s. (5s overlap / 10s original)
+    # Adjusted Job Time: 15s (total_time - excluded_time) = 25s - 5s = 20s
+    # Expected Training Prep Badput: 5s / 20s * 100 = 25%
+    self.assertAlmostEqual(
+        breakdown[BadputType.TRAINING_PREP], 25, delta=0.1
+    )
+
 if __name__ == '__main__':
   googletest.main()

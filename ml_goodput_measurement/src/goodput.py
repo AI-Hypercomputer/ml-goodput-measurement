@@ -12,6 +12,7 @@ from typing import Any, Optional, Union
 
 from cloud_goodput.ml_goodput_measurement.src import checkpoint_badput_calculator
 from cloud_goodput.ml_goodput_measurement.src import goodput_cache
+from cloud_goodput.ml_goodput_measurement.src import goodput_exclusion
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 
 
@@ -498,7 +499,7 @@ class GoodputRecorder:
     })
 
 
-class GoodputCalculator:
+class GoodputCalculator(goodput_exclusion.GoodputExclusion):
   """The Goodput calculator class, responsible for querying necessary information and computing Goodput metrics to return to the user application.
 
   Attributes:
@@ -613,6 +614,44 @@ class GoodputCalculator:
         else:
           total_unproductive_time[badput_type] = unproductive_value
 
+  def _extract_custom_sync_intervals(
+      self,
+      entries: list[dict[str, Any]],
+  ) -> list[tuple[float, float, str]]:
+    """Extracts custom badput intervals from Cloud Logging entries.
+
+    This helper function scans through a list of Cloud Logging entries to find
+    custom badput start and end times, pairing them into intervals.
+
+    Args:
+        entries: A list of dictionaries representing Cloud Logging entries. Each
+          entry may contain keys indicating the start or end of a custom badput
+          event.
+
+    Returns:
+        A list of tuples, where each tuple consists of:
+            - start_time (float): The timestamp when the sync event started.
+            - end_time (float): The timestamp when the sync event ended.
+            - sync_type (str): The type of custom sync
+            event.
+    """
+    intervals = []
+    active_syncs = {}
+
+    for entry in entries:
+      if _CUSTOM_BADPUT_EVENT_START_TIME in entry:
+        sync_type = entry[_CUSTOM_BADPUT_EVENT_TYPE].upper()
+        active_syncs[sync_type] = entry[_CUSTOM_BADPUT_EVENT_START_TIME]
+      elif _CUSTOM_BADPUT_EVENT_END_TIME in entry:
+        sync_type = entry[_CUSTOM_BADPUT_EVENT_TYPE].upper()
+        if sync_type in active_syncs:
+          start_time = active_syncs.pop(sync_type)
+          end_time = entry[_CUSTOM_BADPUT_EVENT_END_TIME]
+          if start_time < end_time:
+            intervals.append((start_time, end_time, sync_type))
+
+    return intervals
+
   def _get_current_productive_and_unproductive_time(
       self, interval_query: Optional[bool] = False
   ) -> tuple[
@@ -632,44 +671,6 @@ class GoodputCalculator:
       (dict of BadputType and unproductive time), the last productive step and
       the last recorded step.
     """
-    def _extract_custom_sync_intervals(
-        entries: list[dict[str, Any]],
-    ) -> list[tuple[float, float, str]]:
-      """Extracts custom badput intervals from Cloud Logging entries.
-
-      This helperfunction scans through a list of Cloud Logging entries to find
-      custom
-      badput start and end times, pairing them into intervals.
-
-      Args:
-          entries: A list of dictionaries representing Cloud Logging entries.
-            Each entry may contain keys indicating the start or end of a custom
-            badput event.
-
-      Returns:
-          A list of tuples, where each tuple consists of:
-              - start_time (float): The timestamp when the sync event started.
-              - end_time (float): The timestamp when the sync event ended.
-              - sync_type (str): The type of custom sync
-              event.
-      """
-      intervals = []
-      active_syncs = {}
-
-      for entry in entries:
-        if _CUSTOM_BADPUT_EVENT_START_TIME in entry:
-          sync_type = entry[_CUSTOM_BADPUT_EVENT_TYPE].upper()
-          active_syncs[sync_type] = entry[_CUSTOM_BADPUT_EVENT_START_TIME]
-        elif _CUSTOM_BADPUT_EVENT_END_TIME in entry:
-          sync_type = entry[_CUSTOM_BADPUT_EVENT_TYPE].upper()
-          if sync_type in active_syncs:
-            start_time = active_syncs.pop(sync_type)
-            end_time = entry[_CUSTOM_BADPUT_EVENT_END_TIME]
-            if start_time < end_time:
-              intervals.append((start_time, end_time, sync_type))
-
-      return intervals
-
     def _compute_adjusted_segment_productive_and_unproductive_time(
         step_items: list[tuple[int, float]],
         curr_step: int,
@@ -840,7 +841,9 @@ class GoodputCalculator:
       min_step = min(step_start_data.keys())
 
       # Extract custom sync intervals
-      custom_sync_intervals = _extract_custom_sync_intervals(entries_to_process)
+      custom_sync_intervals = self._extract_custom_sync_intervals(
+          entries_to_process
+      )
 
       # Compute adjusted segmentproductive and unproductive times
       (
@@ -1760,6 +1763,7 @@ class GoodputCalculator:
             MetricType.DISRUPTION_COUNT.value: 0,
             MetricType.STEP_TIME_DEVIATION.value: {},
             MetricType.IDEAL_STEP_TIME.value: 0.0,
+            MetricType.TOTAL_EXCLUDED_TIME.value: 0.0,
         }
 
       (
@@ -1816,6 +1820,7 @@ class GoodputCalculator:
           MetricType.DISRUPTION_COUNT.value: number_of_disruptions,
           MetricType.STEP_TIME_DEVIATION.value: step_time_deviation,
           MetricType.IDEAL_STEP_TIME.value: ideal_step_time,
+          MetricType.TOTAL_EXCLUDED_TIME.value: 0.0,
       }
 
   def get_interval_metric_details(

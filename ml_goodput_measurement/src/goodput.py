@@ -59,6 +59,7 @@ _CUSTOM_BADPUT_EVENT_START_TIME = 'custom_badput_event_start_time'
 _CUSTOM_BADPUT_EVENT_END_TIME = 'custom_badput_event_end_time'
 
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
+_CLOUD_LOGGING_DEFAULT_RETENTION = datetime.timedelta(days=60)
 
 logger = logging.getLogger(__name__)
 
@@ -72,19 +73,34 @@ class _CloudLogger:
     job_start_time: Start time of the job run.
   """
 
-  def __init__(self, job_name: str, log_name: str):
+  def __init__(
+      self,
+      job_name: str,
+      log_name: str,
+      max_logs_retention_period: Optional[datetime.timedelta] = None,
+  ):
     """_CloudLogger constructor.
 
     Args:
       job_name: Name of the job the _CloudLogger is for.
       log_name: Name of the log being written.
+      max_logs_retention_period: Maximum retention period for Cloud Logging
+        logs.
     """
+
     import google.cloud.logging  # pylint: disable=g-import-not-at-top
 
     self.job_name = job_name
     logging_client = google.cloud.logging.Client()
+    self.project_id = logging_client.project
+    self.log_name = log_name
     self.logger = logging_client.logger(log_name)
     self.job_start_time = None
+    self.retention_period = (
+        max_logs_retention_period
+        if max_logs_retention_period
+        else _CLOUD_LOGGING_DEFAULT_RETENTION
+    )
 
   def write_cloud_logging_entry(self, entry) -> None:
     """Writes an entry to the Cloud Logging logger at INFO level.
@@ -109,10 +125,13 @@ class _CloudLogger:
       ] = None,  # (timestamp, id)
   ) -> str:
     """Gets the filter message for the Cloud Logging query."""
-    filter_entries = [
-        'severity=INFO',
-        f'jsonPayload.job_name="{self.job_name}"',
-    ]
+    filter_entries = []
+    if self.project_id:
+      full_log_name = f'projects/{self.project_id}/logs/{self.log_name}'
+      filter_entries.append(f'logName="{full_log_name}"')
+
+    filter_entries.append('severity=INFO')
+    filter_entries.append(f'jsonPayload.job_name="{self.job_name}"')
     # Add a filter to bind an end-time to the query window.
     if end_time is None:
       end_time = datetime.datetime.now(datetime.timezone.utc)
@@ -141,6 +160,8 @@ class _CloudLogger:
         effective_start_timestamp = effective_start_timestamp.replace(
             tzinfo=datetime.timezone.utc
         )
+    else:
+      effective_start_timestamp = end_time - self.retention_period
 
     if effective_start_timestamp is not None:
       if effective_start_entry_id:
@@ -513,6 +534,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       logger_name: str,
       cloud_logger: Optional[_CloudLogger] = None,
       using_pathways: bool = False,
+      max_logs_retention_period: Optional[datetime.timedelta] = None,
   ):
     """GoodputCalculator constructor.
 
@@ -521,13 +543,19 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       logger_name: Name of the log being written.
       cloud_logger: Should never be passed directly by the user.
       using_pathways: Whether or not the job uses Pathways.
+      max_logs_retention_period: Optional retention period for query of Cloud
+        Logging entries.
     """
     self.job_name = job_name
     self.using_pathways = using_pathways
     if cloud_logger is not None:
       self._cloud_logger = cloud_logger
     else:
-      self._cloud_logger = _CloudLogger(job_name, logger_name)
+      self._cloud_logger = _CloudLogger(
+          job_name,
+          logger_name,
+          max_logs_retention_period=max_logs_retention_period,
+      )
     self._current_entries = []
     self._goodput_cache = GoodputCache()
     self._goodput_cache_lock = threading.Lock()

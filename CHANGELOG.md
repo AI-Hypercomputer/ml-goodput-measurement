@@ -20,6 +20,11 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   * Update the `[Unreleased]` url: `v1.0.0...HEAD` -> `v2.0.0...HEAD`
 
 -->
+## [0.0.16] - 2026-01-10
+
+* Add Exclusion API post-processing support & example offline scripts.
+* Speed up Cloud Logging read latencies.
+
 ## [0.0.15] - 2025-09-09
 
 * Refactor the GoodputMonitor to use multiprocessing instead of multithreading.
@@ -110,6 +115,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.0.16]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.15...v0.0.16
 [0.0.15]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.14...v0.0.15
 [0.0.14]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.13...v0.0.14
 [0.0.13]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.12...v0.0.13

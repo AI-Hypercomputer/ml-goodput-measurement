@@ -8,7 +8,7 @@ Environment Setup:
     $ pip install ml-goodput-measurement>=0.0.16
 
 Usage:
-  $ python goodput_analysis_auto.py
+  $ python exclusion_query.py
 
 Exclusion JSON Format (UTC):
   [
@@ -24,7 +24,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 from ml_goodput_measurement import goodput
 
 
@@ -104,8 +104,11 @@ def analyze_run(
     exclusions.sort(key=lambda x: x[0])
 
   try:
+    approx_start_time = datetime.timedelta(days=5)
     calculator = goodput.GoodputCalculator(
-        job_name=run_name, logger_name=logger_name
+        job_name=run_name,
+        logger_name=logger_name,
+        max_logs_retention_period=approx_start_time,
     )
 
     if exclusions:
@@ -149,7 +152,7 @@ def print_report(
       (goodput.BadputType.TPU_INITIALIZATION, "Device Initialization"),
       (goodput.BadputType.TRAINING_PREP, "Training Preparation"),
       (goodput.BadputType.PROGRAM_STARTUP, "Program Startup"),
-      (goodput.BadputType.DATA_LOADING, "Data Loading"),
+      (goodput.BadputType.DATA_LOADING_SYNC, "Data Loading"),
       (
           goodput.BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
           "Disruption: Wasted Progress",

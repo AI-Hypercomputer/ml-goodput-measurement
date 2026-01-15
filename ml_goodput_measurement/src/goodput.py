@@ -1172,7 +1172,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           end_time = query_time
         return end_time.timestamp() - start_time.timestamp()
 
-    # De-serealize job start and end times from cloud logging entries. These
+    # De-serialize job start and end times from cloud logging entries. These
     # will be used to compute total runtime of the job.
     job_start_time = None
     job_end_time = None
@@ -1353,7 +1353,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     This method also returns the Badput breakdown of the job if
     `include_badput_breakdown` is set to True.
 
-    Additionaly, this method returns the last step recorded for the job. This is
+    Additionally, this method returns the last step recorded for the job. This is
     primarily used for improving monitoring and observability of the job's
     overall Goodput as a function of number of executed steps.
 
@@ -1459,7 +1459,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     a specific window of time, this method provides the metrics computed between
     the start and end of this window.
 
-    Additionaly, this method returns the last step recorded for the job. This is
+    Additionally, this method returns the last step recorded for the job. This is
     primarily used for improving monitoring and observability of the job's
     overall Goodput as a function of number of executed steps.
 

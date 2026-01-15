@@ -641,7 +641,7 @@ class GoodputMonitor:
         Monitoring.
       monitoring_enabled: Whether to enable monitoring. If the application is
         interested in monitoring Goodput, it should set this value to True if
-        monitoring from TPU worker 0 andthe application's configurations request
+        monitoring from TPU worker 0 and the application's configurations request
         Goodput monitoring.
       pathway_enabled: Whether the application is using Pathways.
       include_badput_breakdown: Whether to query and upload badput breakdown

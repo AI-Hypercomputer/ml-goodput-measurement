@@ -59,7 +59,7 @@
 
  The `GoodputMonitor` exposes APIs to query and upload goodput and step time
  deviation data to Tensorboard asynchronously. It does this by instantiating a
- `GoodputCaluclator` under the hood.
+ `GoodputCalculator` under the hood.
 
 ## Installation
 

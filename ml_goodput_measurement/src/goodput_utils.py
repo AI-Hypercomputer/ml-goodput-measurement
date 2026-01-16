@@ -42,6 +42,7 @@ class GCPOptions:
   location: Optional[str] = None
   replica_id: str = '0'
   acc_type: Optional[str] = None
+  cluster_name: Optional[str] = None
   enable_gcp_goodput_metrics: bool = True
   enable_gcp_step_deviation_metrics: bool = True
 
@@ -383,3 +384,12 @@ def get_accelerator_type():
       return accelerator_type
 
   return 'UNKNOWN'
+
+
+def get_cluster_name() -> Optional[str]:
+  """Retrieves the cluster name from GCP metadata server.
+
+  Returns:
+    str: The cluster name as a string, or None if not found.
+  """
+  return get_gcp_metadata('instance', 'attributes/cluster-name')

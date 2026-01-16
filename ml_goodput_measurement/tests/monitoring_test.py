@@ -360,6 +360,7 @@ class GoodputMonitorTests(absltest.TestCase):
         location='test-location',
         acc_type='test-acc-type',
         replica_id='test-replica-id',
+        cluster_name='test-cluster-name',
     )
 
     goodput_monitor = GoodputMonitor(
@@ -409,6 +410,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     {
                         'goodput_source': 'TOTAL',
                         'accelerator_type': 'test-acc-type',
+                        'cluster_name': 'test-cluster-name',
                     },
                     10.0,
                 )
@@ -422,6 +424,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     {
                         'badput_source': 'TPU_INITIALIZATION',
                         'accelerator_type': 'test-acc-type',
+                        'cluster_name': 'test-cluster-name',
                     },
                     2.0,
                 )
@@ -435,6 +438,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     {
                         'badput_source': 'DATA_LOADING_SYNC',
                         'accelerator_type': 'test-acc-type',
+                        'cluster_name': 'test-cluster-name',
                     },
                     1.0,
                 )
@@ -448,6 +452,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     {
                         'accelerator_type': 'test-acc-type',
                         'window_type': 'CUMULATIVE',
+                        'cluster_name': 'test-cluster-name',
                     },
                     0,
                 )
@@ -460,6 +465,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     'compute.googleapis.com/workload/max_productive_steps',
                     {
                         'accelerator_type': 'test-acc-type',
+                        'cluster_name': 'test-cluster-name',
                     },
                     2,
                 )
@@ -473,6 +479,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     {
                         'accelerator_type': 'test-acc-type',
                         'window_type': 'CUMULATIVE',
+                        'cluster_name': 'test-cluster-name',
                     },
                     20.0,
                 )
@@ -485,6 +492,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     'compute.googleapis.com/workload/step_time_deviation',
                     {
                         'accelerator_type': 'test-acc-type',
+                        'cluster_name': 'test-cluster-name',
                     },
                     1.0,
                 )
@@ -497,6 +505,7 @@ class GoodputMonitorTests(absltest.TestCase):
                     'compute.googleapis.com/workload/performance',
                     {
                         'accelerator_type': 'test-acc-type',
+                        'cluster_name': 'test-cluster-name',
                     },
                     1.0,
                 )
@@ -1085,6 +1094,77 @@ class GoodputMonitorTests(absltest.TestCase):
     mock_final_goodput_query_and_upload.assert_called_once()
     mock_final_step_deviation_query_and_upload.assert_called_once()
     mock_final_interval_goodput_query_and_upload.assert_called_once()
+
+  @patch('google.cloud.monitoring_v3.MetricServiceClient')
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_upload_goodput_metrics_includes_cluster_name(
+      self,
+      mock_logging_client,
+      mock_summary_writer,
+      mock_metric_service_client,
+  ):
+    """Verifies that cluster_name label is attached when configured."""
+    mock_client = MagicMock()
+    mock_metric_service_client.return_value = mock_client
+    mock_logging_client.return_value = MagicMock()
+    mock_summary_writer.return_value = MagicMock()
+
+    gcp_options = GCPOptions(
+        enable_gcp_goodput_metrics=True,
+        project_id='test-project',
+        location='test-location',
+        acc_type='test-acc-type',
+        replica_id='test-replica-id',
+        cluster_name='test-cluster',
+    )
+
+    goodput_monitor = GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        gcp_options=gcp_options,
+    )
+    goodput_monitor._goodput_calculator.get_job_goodput_details = MagicMock(
+        return_value={
+            MetricType.GOODPUT_TIME.value: {
+                GoodputType.TOTAL: 90.0,
+            },
+            MetricType.BADPUT_TIME.value: {},
+            MetricType.DISRUPTION_COUNT.value: 0,
+            MetricType.MAX_PRODUCTIVE_STEP.value: 0,
+            MetricType.TOTAL_ELAPSED_TIME.value: 0.0,
+            MetricType.STEP_TIME_DEVIATION.value: {},
+            MetricType.IDEAL_STEP_TIME.value: 0.0,
+        }
+    )
+
+    details = goodput_monitor._goodput_calculator.get_job_goodput_details()
+    monitoring._upload_goodput_metrics_to_gcm(
+        goodput_monitor._metrics_sender,
+        details,
+        goodput_monitor._worker_config,
+    )
+
+    mock_client.create_time_series.assert_called_once()
+    call_kwargs = mock_client.create_time_series.call_args.kwargs
+    actual_time_series_list = call_kwargs['time_series']
+
+    goodput_ts = next(
+        (
+            ts
+            for ts in actual_time_series_list
+            if ts.metric.type == 'compute.googleapis.com/workload/goodput_time'
+        ),
+        None,
+    )
+    self.assertIsNotNone(
+        goodput_ts, 'Goodput time metric not found in upload call'
+    )
+    self.assertIn('cluster_name', goodput_ts.metric.labels)
+    self.assertEqual(goodput_ts.metric.labels['cluster_name'], 'test-cluster')
 
 
 if __name__ == '__main__':

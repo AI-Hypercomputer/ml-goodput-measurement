@@ -320,6 +320,15 @@ def _upload_goodput_metrics_to_gcm(
     # Use the config dictionary instead of self-based attributes
     gcp_options = config['gcp_options']
     job_name = config['job_name']
+    optional_labels = {}
+    cluster_name = getattr(gcp_options, 'cluster_name', None)
+    if cluster_name:
+      optional_labels['cluster_name'] = cluster_name
+
+    def _build_labels(labels_dict):
+      labels = labels_dict.copy()
+      labels.update(optional_labels)
+      return labels
 
     # Populate goodput time metrics.
     for goodput_type, time_value in goodput_details[
@@ -331,10 +340,10 @@ def _upload_goodput_metrics_to_gcm(
           'metric_type': 'compute.googleapis.com/workload/goodput_time',
           'value': time_value,
           'value_type': ValueType.DOUBLE,
-          'metric_labels': {
+          'metric_labels': _build_labels({
               'goodput_source': goodput_type.name,
               'accelerator_type': gcp_options.acc_type,
-          },
+          }),
           'resource_type': 'compute.googleapis.com/Workload',
           'resource_labels': {
               'location': gcp_options.location,
@@ -353,10 +362,10 @@ def _upload_goodput_metrics_to_gcm(
           'metric_type': 'compute.googleapis.com/workload/badput_time',
           'value': time_value,
           'value_type': ValueType.DOUBLE,
-          'metric_labels': {
+          'metric_labels': _build_labels({
               'badput_source': badput_label,
               'accelerator_type': gcp_options.acc_type,
-          },
+          }),
           'resource_type': 'compute.googleapis.com/Workload',
           'resource_labels': {
               'location': gcp_options.location,
@@ -370,10 +379,10 @@ def _upload_goodput_metrics_to_gcm(
         'metric_type': 'compute.googleapis.com/workload/disruptions',
         'value': goodput_details[MetricType.DISRUPTION_COUNT.value],
         'value_type': ValueType.INT,
-        'metric_labels': {
+        'metric_labels': _build_labels({
             'accelerator_type': gcp_options.acc_type,
             'window_type': MonitoringWindowType.CUMULATIVE.value,
-        },
+        }),
         'resource_type': 'compute.googleapis.com/Workload',
         'resource_labels': {
             'location': gcp_options.location,
@@ -387,7 +396,9 @@ def _upload_goodput_metrics_to_gcm(
         'metric_type': 'compute.googleapis.com/workload/max_productive_steps',
         'value': goodput_details[MetricType.MAX_PRODUCTIVE_STEP.value],
         'value_type': ValueType.INT,
-        'metric_labels': {'accelerator_type': gcp_options.acc_type},
+        'metric_labels': _build_labels(
+            {'accelerator_type': gcp_options.acc_type}
+        ),
         'resource_type': 'compute.googleapis.com/Workload',
         'resource_labels': {
             'location': gcp_options.location,
@@ -410,7 +421,9 @@ def _upload_goodput_metrics_to_gcm(
           'metric_type': 'compute.googleapis.com/workload/step_time_deviation',
           'value': step_time_deviation_from_baseline,
           'value_type': ValueType.DOUBLE,
-          'metric_labels': {'accelerator_type': gcp_options.acc_type},
+          'metric_labels': _build_labels(
+              {'accelerator_type': gcp_options.acc_type}
+          ),
           'resource_type': 'compute.googleapis.com/Workload',
           'resource_labels': {
               'location': gcp_options.location,
@@ -424,10 +437,10 @@ def _upload_goodput_metrics_to_gcm(
         'metric_type': 'compute.googleapis.com/workload/total_elapsed_time',
         'value': goodput_details[MetricType.TOTAL_ELAPSED_TIME.value],
         'value_type': ValueType.DOUBLE,
-        'metric_labels': {
+        'metric_labels': _build_labels({
             'accelerator_type': gcp_options.acc_type,
             'window_type': MonitoringWindowType.CUMULATIVE.value,
-        },
+        }),
         'resource_type': 'compute.googleapis.com/Workload',
         'resource_labels': {
             'location': gcp_options.location,
@@ -547,6 +560,16 @@ def _upload_interval_goodput_metrics_to_gcm(
       )
       return
 
+    optional_labels = {}
+    cluster_name = getattr(gcp_options, 'cluster_name', None)
+    if cluster_name:
+      optional_labels['cluster_name'] = cluster_name
+
+    def _build_labels(labels_dict):
+      labels = labels_dict.copy()
+      labels.update(optional_labels)
+      return labels
+
     # Populate Interval Goodput.
     interval_goodput_data = interval_metric_details.get(
         IntervalMetricType.INTERVAL_GOODPUT.value, {}
@@ -559,11 +582,11 @@ def _upload_interval_goodput_metrics_to_gcm(
             'metric_type': 'compute.googleapis.com/workload/interval_goodput',
             'value': goodput_value,
             'value_type': ValueType.DOUBLE,
-            'metric_labels': {
+            'metric_labels': _build_labels({
                 'goodput_source': goodput_type.name,
                 'accelerator_type': gcp_options.acc_type,
                 'rolling_window_size': str(window_size),
-            },
+            }),
             'resource_type': 'compute.googleapis.com/Workload',
             'resource_labels': {
                 'location': gcp_options.location,
@@ -583,11 +606,11 @@ def _upload_interval_goodput_metrics_to_gcm(
           'metric_type': 'compute.googleapis.com/workload/interval_badput',
           'value': badput_value,
           'value_type': ValueType.DOUBLE,
-          'metric_labels': {
+          'metric_labels': _build_labels({
               'badput_source': badput_type,
               'accelerator_type': gcp_options.acc_type,
               'rolling_window_size': str(window_size),
-          },
+          }),
           'resource_type': 'compute.googleapis.com/Workload',
           'resource_labels': {
               'location': gcp_options.location,

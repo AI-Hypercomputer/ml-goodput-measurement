@@ -18,6 +18,7 @@ _METADATA_SERVER_URL = 'http://metadata.google.internal/computeMetadata/v1/'
 _METADATA_HEADERS = {'Metadata-Flavor': 'Google'}
 
 MACHINE_TYPE_TO_ACCELERATOR_TYPE_MAPPING = {
+    'tpu7x': 'TPU-7x',
     'ct6e': 'TPU-v6e',
     'ct5p': 'TPU-v5p',
     'ct5lp': 'TPU-v5e',

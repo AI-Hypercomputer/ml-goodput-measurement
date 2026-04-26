@@ -35,7 +35,6 @@ class Segment:
 
 
 def build_timeline(parsed: ParsedLogs) -> list[Segment]:
-  """Return Segments sorted by start time."""
   segments: list[Segment] = []
   job_starts = parsed.job_starts
 

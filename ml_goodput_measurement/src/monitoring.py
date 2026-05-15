@@ -653,6 +653,7 @@ class GoodputMonitor:
       configured_ideal_step_time=None,
       step_deviation_interval_seconds=10,
       gcp_options: GCPOptions = GCPOptions(),
+      skip_final_flush: bool = False,
   ):
     """Initializes the GoodputMonitor.
 
@@ -664,8 +665,8 @@ class GoodputMonitor:
         Monitoring.
       monitoring_enabled: Whether to enable monitoring. If the application is
         interested in monitoring Goodput, it should set this value to True if
-        monitoring from TPU worker 0 and the application's configurations request
-        Goodput monitoring.
+        monitoring from TPU worker 0 and the application's configurations
+        request Goodput monitoring.
       pathway_enabled: Whether the application is using Pathways.
       include_badput_breakdown: Whether to query and upload badput breakdown
         data to Tensorboard.
@@ -676,6 +677,8 @@ class GoodputMonitor:
       step_deviation_interval_seconds: The interval to query step deviation
         data.
       gcp_options: The options for Google Cloud Monitoring.
+      skip_final_flush: Whether to skip the final goodput metrics flush upon
+        termination.
     """
     if not monitoring_enabled:
       logger.info(
@@ -684,6 +687,7 @@ class GoodputMonitor:
       self._initialized = False
       return
     self._initialized = True
+    self._skip_final_flush = skip_final_flush
 
     self._goodput_calculator = GoodputCalculator(
         job_name=job_name,
@@ -780,7 +784,7 @@ class GoodputMonitor:
         self._goodput_process.pid,
     )
 
-  def stop_goodput_uploader(self):
+  def stop_goodput_uploader(self, skip_final_flush: bool | None = None):
     """Stops the cumulative goodput uploader process and performs a final upload."""
     if not self._initialized:
       return
@@ -808,7 +812,13 @@ class GoodputMonitor:
             exit_code,
         )
     self._goodput_process = None
-    self._final_goodput_query_and_upload()
+    should_skip = (
+        skip_final_flush
+        if skip_final_flush is not None
+        else getattr(self, '_skip_final_flush', False)
+    )
+    if not should_skip:
+      self._final_goodput_query_and_upload()
 
   def _final_goodput_query_and_upload(self):
     """Performs final cumulative goodput query and uploads data to Tensorboard & GCM."""
@@ -884,7 +894,7 @@ class GoodputMonitor:
         self._step_deviation_process.pid,
     )
 
-  def stop_step_deviation_uploader(self):
+  def stop_step_deviation_uploader(self, skip_final_flush: bool | None = None):
     """Stops the step deviation uploader process and performs a final upload."""
     if not self._initialized:
       return
@@ -917,7 +927,13 @@ class GoodputMonitor:
         )
 
     self._step_deviation_process = None
-    self._final_step_deviation_query_and_upload()
+    should_skip = (
+        skip_final_flush
+        if skip_final_flush is not None
+        else getattr(self, '_skip_final_flush', False)
+    )
+    if not should_skip:
+      self._final_step_deviation_query_and_upload()
 
   def _final_step_deviation_query_and_upload(self):
     """Performs a final step deviation query and upload."""
@@ -974,7 +990,9 @@ class GoodputMonitor:
         self._rolling_window_process.pid,
     )
 
-  def stop_rolling_window_goodput_uploader(self):
+  def stop_rolling_window_goodput_uploader(
+      self, skip_final_flush: bool | None = None
+  ):
     """Stops the rolling window goodput uploader process and performs a final upload."""
     if not self._initialized:
       return
@@ -1007,7 +1025,13 @@ class GoodputMonitor:
         )
 
     self._rolling_window_process = None
-    self._final_rolling_window_goodput_query_and_upload()
+    should_skip = (
+        skip_final_flush
+        if skip_final_flush is not None
+        else getattr(self, '_skip_final_flush', False)
+    )
+    if not should_skip:
+      self._final_rolling_window_goodput_query_and_upload()
 
   def _final_rolling_window_goodput_query_and_upload(self):
     """Performs a finalrolling window goodput query and upload."""

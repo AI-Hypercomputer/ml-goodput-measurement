@@ -181,6 +181,92 @@ class GoodputMonitorTests(absltest.TestCase):
     self.assertIsNone(goodput_monitor._goodput_process)
 
   @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'
+  )
+  @patch('multiprocessing.Event')
+  @patch('multiprocessing.Process')
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_multiprocess_goodput_monitor_start_and_stop_skip_final_flush(
+      self,
+      mock_logger_client,
+      mock_summary_writer,
+      mock_process,
+      mock_event,
+      mock_final_goodput_upload,
+  ):
+    mock_process_instance = mock_process.return_value
+    mock_process_instance.is_alive.return_value = True
+
+    mock_goodput_event = MagicMock()
+    mock_step_deviation_event = MagicMock()
+    mock_rolling_window_event = MagicMock()
+    mock_event.side_effect = [
+        mock_goodput_event,
+        mock_step_deviation_event,
+        mock_rolling_window_event,
+    ]
+
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+
+    goodput_monitor = monitoring.GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        skip_final_flush=True,
+    )
+
+    goodput_monitor.start_goodput_uploader()
+    goodput_monitor.stop_goodput_uploader()
+    mock_final_goodput_upload.assert_not_called()
+
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'
+  )
+  @patch('multiprocessing.Event')
+  @patch('multiprocessing.Process')
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_multiprocess_goodput_monitor_stop_override_skip_final_flush(
+      self,
+      mock_logger_client,
+      mock_summary_writer,
+      mock_process,
+      mock_event,
+      mock_final_goodput_upload,
+  ):
+    mock_process_instance = mock_process.return_value
+    mock_process_instance.is_alive.return_value = True
+
+    mock_goodput_event = MagicMock()
+    mock_step_deviation_event = MagicMock()
+    mock_rolling_window_event = MagicMock()
+    mock_event.side_effect = [
+        mock_goodput_event,
+        mock_step_deviation_event,
+        mock_rolling_window_event,
+    ]
+
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+
+    goodput_monitor = monitoring.GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        skip_final_flush=False,
+    )
+
+    goodput_monitor.start_goodput_uploader()
+    goodput_monitor.stop_goodput_uploader(skip_final_flush=True)
+    mock_final_goodput_upload.assert_not_called()
+
+  @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._write_goodput_to_tensorboard'
   )
   @patch('tensorboardX.writer.SummaryWriter')

@@ -518,8 +518,12 @@ Create a `GoodputMonitor` object with the following parameters:
  5. `monitoring_enabled`: Whether or not monitoring is enabled.
         If the application is interested in monitoring Goodput, it should set
         this value to True. Only one worker should enable monitoring.
- 6. `include_badput_breakdown`: Whether to query and upload badput breakdown
+  6. `include_badput_breakdown`: Whether to query and upload badput breakdown
         data to Tensorboard.
+  7. `skip_final_flush`: Whether to skip the final goodput metrics flush upon
+        termination. Defaults to `False`. Setting this to `True` is useful to
+        avoid blocking job termination, as the final flush can take longer
+        due to Cloud Logging reads.
 
 > **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
    In JAX, for example, the check could be `if jax.process_index() == 0`
@@ -587,11 +591,17 @@ goodput_monitor.start_goodput_uploader()
 Call the `stop_goodput_uploader` API to perform a final upload of all metrics
 and safely exit.
 
-> **_NOTE:_** This will stop all cumulative metrics upload processes.
+> _NOTE:_ This will stop all cumulative metrics upload processes.
+
+You can optionally skip the final flush during shutdown to avoid blocking job termination (as the final flush can take several minutes due to Cloud Logging reads). To do this, pass `skip_final_flush=True` to `stop_goodput_uploader`:
 
 ```python
-goodput_monitor.stop_goodput_uploader()
+goodput_monitor.stop_goodput_uploader(skip_final_flush=True)
 ```
+
+Alternatively, you can configure this during initialization of `GoodputMonitor` by passing `skip_final_flush=True` to the constructor.
+
+Similarly, you can also pass `skip_final_flush=True` to `stop_rolling_window_goodput_uploader()`.
 
 ### Monitor Rolling Window Goodput Metrics
 

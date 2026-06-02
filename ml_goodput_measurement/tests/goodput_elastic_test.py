@@ -162,5 +162,119 @@ class ElasticGoodputTest(googletest.TestCase):
     self.assertEqual(len(entries), 0)
 
 
+class ElasticGoodputCalculatorTest(googletest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = 'test-run'
+    self.logger_name = 'test-log'
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput_elastic.ElasticGoodputRecorder(
+        self.job_name,
+        self.logger_name,
+        True,
+        self.mock_cloud_logger,
+    )
+    self.goodput_calculator = goodput_elastic.ElasticGoodputCalculator(
+        self.job_name, self.logger_name, self.mock_cloud_logger
+    )
+
+  def test_compute_time_weighted_efficiency(self):
+
+    start_time = datetime.datetime(
+        2026, 5, 28, 0, 0, 0, tzinfo=datetime.timezone.utc
+    )
+
+    self.goodput_recorder.record_elastic_slice_counts(2, 4, 2, start_time)
+
+    change_time = start_time + datetime.timedelta(hours=8)
+    self.goodput_recorder.record_elastic_slice_counts(2, 4, 4, change_time)
+
+    end_time = start_time + datetime.timedelta(hours=9)
+
+    entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
+    slice_records = self.goodput_calculator._extract_slice_count_entries(
+        entries
+    )
+
+    stepping_eff, available_eff = (
+        self.goodput_calculator._compute_time_weighted_efficiency(
+            slice_records,
+            start_time.timestamp(),
+            end_time.timestamp(),
+        )
+    )
+
+    self.assertAlmostEqual(stepping_eff, 0.50)
+    self.assertAlmostEqual(
+        available_eff, 5.0 / 9.0
+    )  # (2/4*8 + 4/4*1)/9 = 5/9 = 0.5555...
+
+  def test_get_current_productive_and_unproductive_time_elastic(self):
+    job_start = datetime.datetime(
+        2026, 5, 28, 0, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start)
+
+    t1 = job_start + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_elastic_wait_start_time('slice_down', t1)
+    t2 = t1 + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_elastic_wait_end_time('slice_down', t2)
+
+    t3 = t2 + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_elastic_wait_start_time('scale_up', t3)
+    t4 = t3 + datetime.timedelta(seconds=15)
+    self.goodput_recorder.record_elastic_wait_end_time('scale_up', t4)
+
+    t5 = t4 + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_elastic_reinit_start_time(t5)
+    t6 = t5 + datetime.timedelta(seconds=20)
+    self.goodput_recorder.record_elastic_reinit_end_time(t6)
+
+    self.goodput_recorder.record_tpu_init_start_time(
+        t5 + datetime.timedelta(seconds=2)
+    )
+    self.goodput_recorder.record_tpu_init_end_time(
+        t5 + datetime.timedelta(seconds=7)
+    )
+
+    self.goodput_recorder.record_training_preparation_start_time(
+        t5 + datetime.timedelta(seconds=10)
+    )
+    self.goodput_recorder.record_training_preparation_end_time(
+        t5 + datetime.timedelta(seconds=15)
+    )
+
+    self.goodput_recorder.record_step_start_time(0, t6)
+    self.goodput_recorder.record_step_start_time(
+        1, t6 + datetime.timedelta(seconds=10)
+    )
+
+    self.goodput_calculator._entries, _ = (
+        self.mock_cloud_logger.read_cloud_logging_entries()
+    )
+
+    prod, unprod, _, _ = (
+        self.goodput_calculator._get_current_productive_and_unproductive_time()
+    )
+
+    self.assertEqual(
+        unprod.get(goodput_utils.BadputType.ELASTIC_SLICE_DOWN), 10.0
+    )
+    self.assertEqual(
+        unprod.get(goodput_utils.BadputType.ELASTIC_SCALE_UP), 15.0
+    )
+    self.assertEqual(
+        unprod.get(goodput_utils.BadputType.ELASTIC_REINITIALIZATION), 20.0
+    )
+
+    self.assertEqual(
+        unprod.get(goodput_utils.BadputType.TPU_INITIALIZATION, 0.0), 0.0
+    )
+    self.assertEqual(
+        unprod.get(goodput_utils.BadputType.TRAINING_PREP, 0.0), 0.0
+    )
+
+
 if __name__ == '__main__':
   googletest.main()

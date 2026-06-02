@@ -92,6 +92,9 @@ class BadputType(enum.Enum):
   INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION = 9
   CUSTOM_BADPUT_EVENTS = 10
   OTHER = 11
+  ELASTIC_SLICE_DOWN = 12
+  ELASTIC_SCALE_UP = 13
+  ELASTIC_REINITIALIZATION = 14
 
 
 class WorkloadMetricDetails(TypedDict):
@@ -109,6 +112,18 @@ class IntervalWorkloadMetricDetails(TypedDict):
   interval_goodput: dict[GoodputType, float]
   interval_badput: dict[BadputType, float | dict[str, float]]
   interval_size: int  # Unit: seconds.
+
+
+class ElasticWorkloadMetricDetails(WorkloadMetricDetails, total=False):
+  stepping_slice_efficiency: float
+  available_slice_efficiency: float
+
+
+class ElasticIntervalWorkloadMetricDetails(
+    IntervalWorkloadMetricDetails, total=False
+):
+  stepping_slice_efficiency: float
+  available_slice_efficiency: float
 
 
 ACTIVITY_EXCLUSION_LIST = [

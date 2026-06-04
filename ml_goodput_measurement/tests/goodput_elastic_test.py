@@ -250,8 +250,8 @@ class ElasticGoodputCalculatorTest(googletest.TestCase):
         1, t6 + datetime.timedelta(seconds=10)
     )
 
-    self.goodput_calculator._entries, _ = (
-        self.mock_cloud_logger.read_cloud_logging_entries()
+    self.goodput_calculator._fetch_new_entries(
+        t6 + datetime.timedelta(seconds=10)
     )
 
     prod, unprod, _, _ = (
@@ -273,6 +273,44 @@ class ElasticGoodputCalculatorTest(googletest.TestCase):
     )
     self.assertEqual(
         unprod.get(goodput_utils.BadputType.TRAINING_PREP, 0.0), 0.0
+    )
+
+  def test_get_job_goodput_details_elastic(self):
+    job_start = datetime.datetime(
+        2026, 5, 28, 0, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start)
+    self.goodput_recorder.record_elastic_slice_counts(2, 4, 2, job_start)
+
+    t1 = job_start + datetime.timedelta(hours=8)
+    self.goodput_recorder.record_elastic_slice_counts(2, 4, 4, t1)
+
+    t2 = t1 + datetime.timedelta(hours=1)
+    self.goodput_recorder.record_step_start_time(0, t2)
+
+    t3 = t2 + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_step_start_time(1, t3)
+
+    job_end = t3 + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    # Populate cache by calling get_job_goodput.
+    self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True,
+        configured_ideal_step_time=10.0,
+    )
+
+    details = self.goodput_calculator.get_job_goodput_details()
+
+    self.assertIn('stepping_slice_efficiency', details)
+    self.assertIn('available_slice_efficiency', details)
+
+    self.assertAlmostEqual(details['stepping_slice_efficiency'], 0.5)
+
+    # 8h * 0.5 + 1h20s * 1.0 / (9h20s)
+    expected_avail_eff = (28800.0 * 0.5 + 3620.0 * 1.0) / 32420.0
+    self.assertAlmostEqual(
+        details['available_slice_efficiency'], expected_avail_eff
     )
 
 

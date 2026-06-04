@@ -8,9 +8,9 @@ from unittest import mock
 
 from absl.testing import absltest
 from cloud_goodput.ml_goodput_measurement.src import gcp_metrics
+from cloud_goodput.ml_goodput_measurement.src import goodput_elastic
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 from cloud_goodput.ml_goodput_measurement.src import monitoring
-
 from google.cloud import monitoring_v3
 
 BadputType = goodput_utils.BadputType

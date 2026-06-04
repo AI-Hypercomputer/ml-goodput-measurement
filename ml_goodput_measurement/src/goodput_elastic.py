@@ -242,7 +242,11 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
     )
     productive_time, unproductive_time, max_step, last_step = result
 
-    entries = self._interval_entries if interval_query else self._entries
+    if interval_query:
+      entries = self._interval_entries
+    else:
+      with self._goodput_cache_lock:
+        entries = list(self._goodput_cache.get_cached_entries())
 
     # Badput from ELASTIC_SLICE_DOWN and ELASTIC_SCALE_UP
     for start, end, etype in self._extract_elastic_wait_intervals(entries):
@@ -300,6 +304,7 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
       interval_start: datetime.datetime,
       interval_end: datetime.datetime,
   ) -> goodput_utils.ElasticIntervalWorkloadMetricDetails:
+    self._interval_entries = []
     result = super().get_interval_metric_details(interval_start, interval_end)
 
     entries = self._interval_entries
@@ -315,4 +320,28 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
       result['stepping_slice_efficiency'] = stepping_slice_efficiency
       result['available_slice_efficiency'] = available_slice_efficiency
 
+    return result
+
+  def get_job_goodput_details(
+      self,
+  ) -> goodput_utils.ElasticWorkloadMetricDetails:
+    result = super().get_job_goodput_details()
+    with self._goodput_cache_lock:
+      entries = list(self._goodput_cache.get_cached_entries())
+      job_start_time = self._goodput_cache.get_job_start_time()
+
+    if job_start_time and entries:
+      slice_records = self._extract_slice_count_entries(entries)
+      if slice_records:
+        total_elapsed = result.get(
+            goodput_utils.MetricType.TOTAL_ELAPSED_TIME.value, 0.0
+        )
+        end_ts = job_start_time.timestamp() + total_elapsed
+        stepping_eff, available_eff = self._compute_time_weighted_efficiency(
+            slice_records,
+            job_start_time.timestamp(),
+            end_ts,
+        )
+        result['stepping_slice_efficiency'] = stepping_eff
+        result['available_slice_efficiency'] = available_eff
     return result

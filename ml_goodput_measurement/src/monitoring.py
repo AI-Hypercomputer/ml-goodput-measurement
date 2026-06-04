@@ -213,7 +213,8 @@ def _rolling_window_worker(config: dict, termination_event: synchronize.Event):
 
 def _create_goodput_calculator(config: dict) -> GoodputCalculator:
   """Creates a GoodputCalculator instance from the shared config."""
-  return GoodputCalculator(
+  calculator_class = config.get('calculator_class', GoodputCalculator)
+  return calculator_class(
       job_name=config['job_name'],
       logger_name=config['logger_name'],
       using_pathways=config['pathway_enabled'],
@@ -462,6 +463,38 @@ def _upload_goodput_metrics_to_gcm(
         },
     })
 
+    # Populate slice efficiency metrics (cumulative).
+    slice_efficiency_metrics = []
+    if config.get('include_slice_efficiency', False):
+      for metric_type, key in (
+          (
+              'compute.googleapis.com/workload/stepping_slice_efficiency',
+              'stepping_slice_efficiency',
+          ),
+          (
+              'compute.googleapis.com/workload/available_slice_efficiency',
+              'available_slice_efficiency',
+          ),
+      ):
+        value = goodput_details.get(key)
+        if value is not None:
+          slice_efficiency_metrics.append({
+              'metric_type': metric_type,
+              'value': value,
+              'value_type': ValueType.DOUBLE,
+              'metric_labels': _build_labels({
+                  'accelerator_type': gcp_options.acc_type,
+              }),
+              'resource_type': 'compute.googleapis.com/Workload',
+              'resource_labels': {
+                  'location': gcp_options.location,
+                  'workload_id': job_name,
+                  'replica_id': gcp_options.replica_id,
+              },
+          })
+    # TODO(b/519328677): Enable after metrics rollout
+    # gcm_metrics.extend(slice_efficiency_metrics)
+
     # Send metrics to Google Cloud Monitoring.
     if metrics_sender and gcm_metrics:
       log_context = {
@@ -619,6 +652,39 @@ def _upload_interval_goodput_metrics_to_gcm(
           },
       })
 
+    # Populate slice efficiency metrics (interval).
+    slice_efficiency_metrics = []
+    if config.get('include_slice_efficiency', False):
+      for metric_type, key in (
+          (
+              'compute.googleapis.com/workload/stepping_slice_efficiency',
+              'stepping_slice_efficiency',
+          ),
+          (
+              'compute.googleapis.com/workload/available_slice_efficiency',
+              'available_slice_efficiency',
+          ),
+      ):
+        value = interval_metric_details.get(key)
+        if value is not None:
+          slice_efficiency_metrics.append({
+              'metric_type': metric_type,
+              'value': value,
+              'value_type': ValueType.DOUBLE,
+              'metric_labels': _build_labels({
+                  'accelerator_type': gcp_options.acc_type,
+                  'rolling_window_size': str(window_size),
+              }),
+              'resource_type': 'compute.googleapis.com/Workload',
+              'resource_labels': {
+                  'location': gcp_options.location,
+                  'workload_id': job_name,
+                  'replica_id': gcp_options.replica_id,
+              },
+          })
+    # TODO(b/519328677): Enable after metrics rollout
+    # gcm_metrics.extend(slice_efficiency_metrics)
+
     if metrics_sender and gcm_metrics:
       log_context = {
           'job_name': config.get('job_name', 'unknown-job'),
@@ -732,6 +798,7 @@ class GoodputMonitor:
         'step_deviation_interval_seconds': step_deviation_interval_seconds,
         'gcp_options': gcp_options,
         'rolling_windows': [],
+        'calculator_class': GoodputCalculator,
     }
 
     # Process management attributes

@@ -1,0 +1,21 @@
+---
+files: ^(.*\.(py|md|sh|yaml|yml|toml|txt|rst|cfg))$
+exclude: ^(\.[^/]*(cache|assets|uv|venv)/.*)$
+repos:
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        args:
+          - '-w'
+          - '--skip=*.txt,.*'
+          - '-L ND,nd'
+          - '.'
+        additional_dependencies:
+          - tomli
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.0
+    hooks:
+      - id: yamllint
+        types: [yaml]

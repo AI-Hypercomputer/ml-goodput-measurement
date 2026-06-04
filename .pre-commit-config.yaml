@@ -19,3 +19,4 @@ repos:
     hooks:
       - id: yamllint
         types: [yaml]
+        exclude: ^\.github/

@@ -45,8 +45,7 @@ jobs:
       - name: Install package and test dependencies
         run: |
           . "$GITHUB_WORKSPACE"/venv/bin/activate
-          uv pip install -e .
-          uv pip install pytest
+          uv pip install -e ".[test]"
 
       - name: Run tests
         run: |

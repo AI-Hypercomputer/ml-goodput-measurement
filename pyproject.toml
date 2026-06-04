@@ -42,6 +42,12 @@ dependencies = [
   "urllib3",
 ]
 
+[project.optional-dependencies]
+test = [
+  "absl-py",
+  "pytest",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/AI-Hypercomputer/ml-goodput-measurement"
 "Bug Tracker" = "https://github.com/AI-Hypercomputer/ml-goodput-measurement/issues"

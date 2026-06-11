@@ -6,6 +6,7 @@ Deviation.
 """
 
 import datetime
+import functools
 import logging
 import threading
 from typing import Any, Optional, Union
@@ -78,17 +79,33 @@ class _CloudLogger:
       job_name: str,
       log_name: str,
       max_logs_retention_period: Optional[datetime.timedelta] = None,
+      *,
+      background_grace_period_s: float = 5.0,
+      background_batch_size: int = 100,
+      background_max_latency_s: float = 2.0,
   ):
     """_CloudLogger constructor.
+
+    Writes are dispatched asynchronously via `CloudLoggingHandler` /
+    `BackgroundThreadTransport`; `write_cloud_logging_entry` returns
+    immediately and a daemon thread commits batched entries.
 
     Args:
       job_name: Name of the job the _CloudLogger is for.
       log_name: Name of the log being written.
       max_logs_retention_period: Maximum retention period for Cloud Logging
         logs.
+
+    Keyword-only:
+      background_grace_period_s: Shutdown drain budget. Default 5.0.
+      background_batch_size: Entries per `write_entries` RPC. Default 100.
+      background_max_latency_s: Max queue dwell after the first entry
+        arrives, before committing. Default 2.0.
     """
 
     import google.cloud.logging  # pylint: disable=g-import-not-at-top
+    from google.cloud.logging_v2.handlers import CloudLoggingHandler  # pylint: disable=g-import-not-at-top
+    from google.cloud.logging_v2.handlers.transports import BackgroundThreadTransport  # pylint: disable=g-import-not-at-top
 
     self.job_name = job_name
     logging_client = google.cloud.logging.Client()
@@ -102,19 +119,52 @@ class _CloudLogger:
         else _CLOUD_LOGGING_DEFAULT_RETENTION
     )
 
+    # Async write path: synchronous `Logger.log_struct` adds ~50-150 ms of
+    # gRPC RTT per call, which compounds on the per-step recorder calls.
+    # `CloudLoggingHandler` gives us a daemon-thread worker, batched commits,
+    # and atexit-safe shutdown.
+    transport_factory = functools.partial(
+        BackgroundThreadTransport,
+        grace_period=background_grace_period_s,
+        batch_size=background_batch_size,
+        max_latency=background_max_latency_s,
+    )
+    self._async_handler = CloudLoggingHandler(
+        client=logging_client,
+        name=log_name,
+        transport=transport_factory,  # type: ignore[arg-type]
+    )
+    # One stdlib logger per _CloudLogger *instance* (not per log_name).
+    # `logging.getLogger(name)` returns a process-global singleton, so if
+    # two _CloudLogger instances are created with the same log_name in the
+    # same process (sequential jobs in a notebook, reusable worker
+    # processes, tests), the second `addHandler` call would attach a
+    # second CloudLoggingHandler onto the shared logger and every entry
+    # would be uploaded twice. Adding `id(self)` makes the name unique
+    # per instance; propagate=False keeps dict payloads off the root
+    # logger.
+    self._async_logger = logging.getLogger(
+        f'_ml_goodput_async.{log_name}.{id(self)}'
+    )
+    self._async_logger.setLevel(logging.INFO)
+    self._async_logger.addHandler(self._async_handler)
+    self._async_logger.propagate = False
+
   def write_cloud_logging_entry(self, entry) -> None:
-    """Writes an entry to the Cloud Logging logger at INFO level.
+    """Writes an entry asynchronously at INFO level.
 
     Args:
       entry: JSON-serializable structured log dictionary.
     """
     if entry is None:
       return
-    if entry[_JOB_NAME] == self.job_name:
-      self.logger.log_struct(
-          entry,
-          severity='INFO',
-      )
+    if entry[_JOB_NAME] != self.job_name:
+      return
+    self._async_logger.info(entry)
+
+  def flush(self) -> None:
+    """Block until every entry enqueued so far has been committed."""
+    self._async_handler.flush()
 
   def _get_filter_msg(
       self,
@@ -196,6 +246,10 @@ class _CloudLogger:
   ):
     """Queries Cloud Logging entries for the specific job.
 
+    Reads following a write may see up to `background_max_latency_s`
+    (2 s default) of staleness, since writes commit asynchronously.
+    Call `GoodputRecorder.flush()` for a strict fence.
+
     Args:
       start_time: The start time of the query window.
       end_time: The end time of the query window.
@@ -254,6 +308,10 @@ class GoodputRecorder:
       logger_name: str,
       logging_enabled=False,
       cloud_logger: Optional[_CloudLogger] = None,
+      *,
+      background_grace_period_s: float = 5.0,
+      background_batch_size: int = 100,
+      background_max_latency_s: float = 2.0,
   ):
     """GoodputRecorder constructor.
 
@@ -266,6 +324,11 @@ class GoodputRecorder:
         this value to True if the Recorder is being called from TPU worker 0 and
         the application's configurations request Goodput logging.
       cloud_logger: Should never be passed directly by the user.
+
+    Keyword-only:
+      background_grace_period_s: Forwarded to the underlying `_CloudLogger`.
+      background_batch_size: Forwarded to the underlying `_CloudLogger`.
+      background_max_latency_s: Forwarded to the underlying `_CloudLogger`.
     """
     self.job_name = job_name
     # If logging is disabled for this process, do not create a _cloud_logger
@@ -278,7 +341,23 @@ class GoodputRecorder:
     if cloud_logger is not None:
       self._cloud_logger = cloud_logger
     else:
-      self._cloud_logger = _CloudLogger(job_name, logger_name)
+      self._cloud_logger = _CloudLogger(
+          job_name,
+          logger_name,
+          background_grace_period_s=background_grace_period_s,
+          background_batch_size=background_batch_size,
+          background_max_latency_s=background_max_latency_s,
+      )
+
+  def flush(self) -> None:
+    """Block until pending async writes from this recorder have committed.
+
+    Use for strict read-after-write fencing (unit tests, end-of-training
+    finalization, hand-off to another process).
+    """
+    if self._cloud_logger is None:
+      return
+    self._cloud_logger.flush()
 
   def record_step_start_time(
       self, step: int, start_time: Optional[datetime.datetime] = None

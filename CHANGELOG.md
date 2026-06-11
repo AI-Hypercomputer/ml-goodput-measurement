@@ -20,6 +20,33 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   * Update the `[Unreleased]` url: `v1.0.0...HEAD` -> `v2.0.0...HEAD`
 
 -->
+## [Unreleased]
+
+### Changed
+
+* `_CloudLogger.write_cloud_logging_entry` is now asynchronous. Writes
+  are dispatched through `google.cloud.logging.handlers.CloudLoggingHandler`
+  (default transport `BackgroundThreadTransport`) instead of calling
+  `Logger.log_struct` synchronously, eliminating the ~50–150 ms gRPC
+  RTT per call on the per-step critical path. Multiple entries are
+  batched into a single `write_entries` RPC.
+
+  Reads following a write may see up to `background_max_latency_s`
+  (2 s default) of staleness — negligible for goodput aggregates over
+  minutes of training, and `GoodputMonitor`'s subprocess pattern is
+  unaffected. Call `GoodputRecorder.flush()` for a strict fence.
+
+  Commit errors are now logged by `google.cloud.logging`'s logger
+  instead of raised inline.
+
+### Added
+
+* `GoodputRecorder.flush()`: block until pending async writes have
+  committed. For strict read-after-write fencing.
+* `GoodputRecorder(..., background_grace_period_s=, background_batch_size=,
+  background_max_latency_s=)`: tuning knobs forwarded to
+  `BackgroundThreadTransport`. Defaults: 5 s / 100 entries / 2 s.
+
 ## [0.0.16] - 2026-01-10
 
 * Add Exclusion API post-processing support & example offline scripts.

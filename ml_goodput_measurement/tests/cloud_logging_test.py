@@ -1,5 +1,6 @@
 """Tests for the _CloudLogger class."""
 import datetime
+import logging
 from unittest import mock
 
 from absl.testing import absltest
@@ -77,7 +78,7 @@ class CloudLoggerTest(absltest.TestCase):
 
   @mock.patch('google.cloud.logging.Client')
   def test_write_logs_entry(self, mock_client_cls):
-    """Verifies entries are written to the logger."""
+    """Verifies entries are routed via the async CloudLoggingHandler."""
     mock_gcp_logger = mock_client_cls.return_value.logger.return_value
 
     mock_client_instance = mock_client_cls.return_value
@@ -86,9 +87,17 @@ class CloudLoggerTest(absltest.TestCase):
     logger = goodput._CloudLogger(self.job_name, self.log_name)
 
     entry = {'job_name': self.job_name, 'data': 123}
-    logger.write_cloud_logging_entry(entry)
+    with mock.patch.object(logger._async_handler, 'emit') as mock_emit:
+      logger.write_cloud_logging_entry(entry)
 
-    mock_gcp_logger.log_struct.assert_called_with(entry, severity='INFO')
+      mock_emit.assert_called_once()
+      record = mock_emit.call_args[0][0]
+      self.assertEqual(record.msg, entry)
+      self.assertEqual(record.levelno, logging.INFO)
+
+    # Synchronous `Logger.log_struct` is no longer called inline; the
+    # async transport commits via `client.logging_api.write_entries`.
+    mock_gcp_logger.log_struct.assert_not_called()
 
   @mock.patch('google.cloud.logging.Client')
   def test_default_retention(self, mock_client_cls):
@@ -133,6 +142,100 @@ class CloudLoggerTest(absltest.TestCase):
     self.assertEqual(
         calculator._cloud_logger.retention_period, custom_retention
     )
+
+
+class CloudLoggerAsyncWritesTest(absltest.TestCase):
+  """Cloud Logging writes are dispatched via CloudLoggingHandler."""
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = 'test-job'
+    self.log_name = 'test-log'
+
+  @mock.patch('google.cloud.logging.Client')
+  def test_handler_attached_with_propagate_false(self, mock_client_cls):
+    mock_client_cls.return_value.project = 'p'
+
+    logger = _CloudLogger(self.job_name, self.log_name)
+
+    self.assertIsNotNone(logger._async_handler)
+    self.assertIn(logger._async_handler, logger._async_logger.handlers)
+    self.assertFalse(
+        logger._async_logger.propagate,
+        'must not propagate dict payloads to root handlers',
+    )
+
+  @mock.patch('google.cloud.logging.Client')
+  def test_write_drops_entries_for_other_job(self, mock_client_cls):
+    """write_cloud_logging_entry is a no-op for entries with a foreign job."""
+    mock_client_cls.return_value.project = 'p'
+
+    logger = _CloudLogger(self.job_name, self.log_name)
+    with mock.patch.object(logger._async_handler, 'emit') as mock_emit:
+      logger.write_cloud_logging_entry(
+          {goodput._JOB_NAME: 'someone-else', 'data': 1}
+      )
+      logger.write_cloud_logging_entry(None)
+      mock_emit.assert_not_called()
+
+  @mock.patch('google.cloud.logging.Client')
+  def test_flush_forwards_to_handler(self, mock_client_cls):
+    mock_client_cls.return_value.project = 'p'
+    logger = _CloudLogger(self.job_name, self.log_name)
+    with mock.patch.object(logger._async_handler, 'flush') as mock_flush:
+      logger.flush()
+      mock_flush.assert_called_once()
+
+  @mock.patch('google.cloud.logging.Client')
+  def test_two_instances_same_log_name_do_not_share_handlers(
+      self, mock_client_cls
+  ):
+    """Regression: each instance must own its own stdlib logger.
+
+    `logging.getLogger(name)` returns a singleton per name, so naming the
+    backing logger only by `log_name` would cause a second instance's
+    `addHandler` to attach onto the first instance's logger — every entry
+    would then be uploaded once per accumulated handler.
+    """
+    mock_client_cls.return_value.project = 'p'
+
+    a = _CloudLogger(self.job_name, self.log_name)
+    b = _CloudLogger(self.job_name, self.log_name)
+
+    self.assertIsNot(a._async_logger, b._async_logger)
+    self.assertEqual(a._async_logger.handlers, [a._async_handler])
+    self.assertEqual(b._async_logger.handlers, [b._async_handler])
+
+    # Writing on `b` must not fan out to `a`'s handler.
+    entry = {goodput._JOB_NAME: self.job_name, 'data': 1}
+    with mock.patch.object(a._async_handler, 'emit') as emit_a, \
+        mock.patch.object(b._async_handler, 'emit') as emit_b:
+      b.write_cloud_logging_entry(entry)
+      emit_a.assert_not_called()
+      emit_b.assert_called_once()
+
+
+class GoodputRecorderFlushTest(absltest.TestCase):
+  """`GoodputRecorder.flush` is the public entry point for explicit drains."""
+
+  @mock.patch('google.cloud.logging.Client')
+  def test_flush_forwards_to_cloud_logger(self, mock_client_cls):
+    mock_client_cls.return_value.project = 'p'
+    recorder = goodput.GoodputRecorder(
+        'test-job', 'test-log', logging_enabled=True
+    )
+    with mock.patch.object(recorder._cloud_logger, 'flush') as mock_flush:
+      recorder.flush()
+      mock_flush.assert_called_once()
+
+  def test_flush_is_noop_when_logging_disabled(self):
+    recorder = goodput.GoodputRecorder(
+        'test-job', 'test-log', logging_enabled=False
+    )
+    self.assertIsNone(recorder._cloud_logger)
+    # Should not raise.
+    recorder.flush()
+
 
 if __name__ == '__main__':
   absltest.main()

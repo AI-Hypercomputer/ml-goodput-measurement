@@ -20,7 +20,8 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   * Update the `[Unreleased]` url: `v1.0.0...HEAD` -> `v2.0.0...HEAD`
 
 -->
-## [Unreleased]
+
+## [0.2.0] - 2026-06-12
 
 ### Changed
 
@@ -41,6 +42,12 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 ### Added
 
+* **Elastic Goodput Monitoring**: Support for elastic training jobs (autoscaling).
+  * `ElasticGoodputRecorder` to record slice counts and wait/reinit events.
+  * `ElasticGoodputCalculator` to compute elastic badput buckets (`ELASTIC_SLICE_DOWN`, `ELASTIC_SCALE_UP`, `ELASTIC_REINITIALIZATION`) and slice efficiency.
+  * `ElasticGoodputMonitor` (as subprocess) to upload these metrics.
+* `GoodputMonitor` and `stop_goodput_uploader` now support `skip_final_flush` to avoid blocking job exit.
+* `GCPOptions` now supports `cluster_name` to attach to GCM metrics.
 * `GoodputRecorder.flush()`: block until pending async writes have
   committed. For strict read-after-write fencing.
 * `GoodputRecorder(..., background_grace_period_s=, background_batch_size=,
@@ -142,6 +149,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.2.0]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.16...v0.2.0
 [0.0.16]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.15...v0.0.16
 [0.0.15]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.14...v0.0.15
 [0.0.14]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.13...v0.0.14

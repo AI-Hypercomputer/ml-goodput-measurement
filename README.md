@@ -677,6 +677,7 @@ gcp_options = goodput_utils.GCPOptions(
       location=None, # If None, the library will automatically identify from GCE internal metadata
       replica_id='0', # Default is '0'
       acc_type=None, # If None, the library will automatically identify from GCE internal metadata
+      cluster_name=None, # Optional GKE cluster name
       enable_gcp_goodput_metrics=True,
       enable_gcp_step_deviation_metrics=True,
     )
@@ -709,6 +710,7 @@ gcp_options = goodput_utils.GCPOptions(
       location=None, # If None, the library will automatically identify from GCE internal metadata
       replica_id='0', # Default is '0'
       acc_type=None, # If None, the library will automatically identify from GCE internal metadata
+      cluster_name=None, # Optional GKE cluster name
       enable_gcp_goodput_metrics=False,
       enable_gcp_step_deviation_metrics=False,
     )
@@ -739,6 +741,7 @@ gcp_options = goodput_utils.GCPOptions(
       location=None, # If None, the library will automatically identify from GCE internal metadata
       replica_id='0', # Default is '0'
       acc_type=None, # If None, the library will automatically identify from GCE internal metadata
+      cluster_name=None, # Optional GKE cluster name
       enable_gcp_goodput_metrics=True,
     )
 
@@ -751,4 +754,54 @@ goodput_monitor = monitoring.GoodputMonitor(
       include_badput_breakdown=True,
       gcp_options=gcp_options
     )
+
+### Elastic Goodput (Experimental)
+
+For elastic training workloads (which support autoscaling and dynamic slice adjustments), the library provides elastic-aware components under `ml_goodput_measurement.goodput_elastic` and `ml_goodput_measurement.monitoring_elastic`.
+
+#### Elastic Components
+*   `ElasticGoodputRecorder`: Inherits from `GoodputRecorder`. Adds APIs to record slice counts and elastic events (wait/reinit).
+*   `ElasticGoodputCalculator`: Inherits from `GoodputCalculator`. Computes additional badput buckets: `ELASTIC_SLICE_DOWN`, `ELASTIC_SCALE_UP`, and `ELASTIC_REINITIALIZATION`, as well as slice efficiency.
+*   `ElasticGoodputMonitor`: Inherits from `GoodputMonitor`. Uses `ElasticGoodputCalculator` and supports uploading slice efficiency metrics.
+
+#### Usage Example
+
+```python
+from ml_goodput_measurement import goodput_elastic
+from ml_goodput_measurement import monitoring_elastic
+
+# 1. Recording Elastic Events (on Lead Host)
+recorder = goodput_elastic.ElasticGoodputRecorder(job_name, logger_name, logging_enabled)
+
+# Record current slice configuration
+recorder.record_elastic_slice_counts(active_slices=4, total_slices=8, available_slices=8)
+
+# Record when waiting for resources (scale up or down)
+recorder.record_elastic_wait_start_time(event_type="scale_up")
+# ... waiting ...
+recorder.record_elastic_wait_end_time(event_type="scale_up")
+
+# Record reinitialization overhead
+recorder.record_elastic_reinit_start_time()
+# ... reinitializing ...
+recorder.record_elastic_reinit_end_time()
+
+
+# 2. Monitoring Elastic Metrics
+gcp_options = monitoring_elastic.GCPOptions(
+    enable_gcp_goodput_metrics=True,
+)
+
+goodput_monitor = monitoring_elastic.ElasticGoodputMonitor(
+    job_name=job_name,
+    logger_name=logger_name,
+    tensorboard_dir=tensorboard_dir,
+    upload_interval=60,
+    monitoring_enabled=True,
+    include_badput_breakdown=True,
+    include_slice_efficiency=True, # Upload stepping/available slice efficiency
+    gcp_options=gcp_options,
+)
+goodput_monitor.start_goodput_uploader()
+```
 ```

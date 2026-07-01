@@ -29,6 +29,9 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
       step_deviation_interval_seconds: int = 10,
       gcp_options: GCPOptions = GCPOptions(),
       skip_final_flush: bool = False,
+      final_flush_timeout_seconds: (
+          float | None
+      ) = monitoring._PROCESS_TERMINATION_TIMEOUT_SECONDS,
   ):
     super().__init__(
         job_name=job_name,
@@ -43,6 +46,7 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
         step_deviation_interval_seconds=step_deviation_interval_seconds,
         gcp_options=gcp_options,
         skip_final_flush=skip_final_flush,
+        final_flush_timeout_seconds=final_flush_timeout_seconds,
     )
     if self._initialized:
       # Replace base calculator with elastic-aware one.

@@ -1565,7 +1565,25 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     """
     # Get the logs for the interval and validate the interval window.
     self._get_interval_log_entries(interval_start, interval_end)
+    return self._compute_job_goodput_interval_metrics(
+        interval_start, interval_end
+    )
 
+  def _compute_job_goodput_interval_metrics(
+      self, interval_start: datetime.datetime, interval_end: datetime.datetime
+  ) -> tuple[
+      float,
+      UnproductiveTimeDict,
+      int,
+      float,
+      int,
+  ]:
+    """Computes Goodput and Badput metrics from the currently loaded self._interval_entries.
+
+    Callers are responsible for populating self._interval_entries (e.g. via
+    _get_interval_log_entries) with entries bounded to
+    [interval_start, interval_end] before calling this method.
+    """
     total_job_time = self._get_total_job_time_from_interval(
         interval_start, interval_end
     )
@@ -1961,3 +1979,98 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
               (interval_end - interval_start).total_seconds()
           ),
       }
+
+  def get_interval_metric_details_for_windows(
+      self,
+      window_sizes_seconds: list[int],
+      now: Optional[datetime.datetime] = None,
+  ) -> dict[int, IntervalWorkloadMetricDetails]:
+    """Computes interval metric details for multiple rolling windows that share the same end time.
+
+    All windows end at `now`, so the log entries for the largest window are a
+    superset of every smaller window's entries. This fetches Cloud Logging
+    entries once for the largest window and reuses that single fetch for
+    every window size, instead of one fetch per window size.
+
+    Args:
+      window_sizes_seconds: The rolling window sizes, in seconds.
+      now: The shared end time for every window. Defaults to the current
+        time.
+
+    Returns:
+      A dict mapping each window size to its IntervalWorkloadMetricDetails.
+    """
+    if not window_sizes_seconds:
+      return {}
+    if now is None:
+      now = datetime.datetime.now(datetime.timezone.utc)
+
+    def _empty_details(window_size: int) -> IntervalWorkloadMetricDetails:
+      return {
+          IntervalMetricType.INTERVAL_GOODPUT.value: {},
+          IntervalMetricType.INTERVAL_BADPUT.value: {},
+          IntervalMetricType.INTERVAL_SIZE.value: window_size,
+      }
+
+    max_window_size = max(window_sizes_seconds)
+    try:
+      self._get_interval_log_entries(
+          now - datetime.timedelta(seconds=max_window_size), now
+      )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.warning(
+          'Failed to fetch interval log entries for rolling window query: %s',
+          e,
+      )
+      return {
+          window_size: _empty_details(window_size)
+          for window_size in window_sizes_seconds
+      }
+
+    all_entries = self._interval_entries
+    results: dict[int, IntervalWorkloadMetricDetails] = {}
+    try:
+      for window_size in window_sizes_seconds:
+        window_start = now - datetime.timedelta(seconds=window_size)
+        # Slicing the superset to fetching this window directly.
+        self._interval_entries = [
+            entry
+            for entry in all_entries
+            if (entry_timestamp := get_timestamp_from_log_entry(entry))
+            is not None
+            and entry_timestamp > window_start
+        ]
+        try:
+          if not self._interval_entries:
+            raise ValueError(
+                'No log entries found within the interval window between'
+                ' %s and %s.' % (window_start, now)
+            )
+          (
+              interval_goodput,
+              interval_badput_breakdown,
+              _,
+              _,
+              _,
+          ) = self._compute_job_goodput_interval_metrics(window_start, now)
+          results[window_size] = {
+              IntervalMetricType.INTERVAL_GOODPUT.value: {
+                  GoodputType.TOTAL: interval_goodput
+              },
+              IntervalMetricType.INTERVAL_BADPUT.value: (
+                  interval_badput_breakdown
+              ),
+              IntervalMetricType.INTERVAL_SIZE.value: window_size,
+          }
+        except Exception as e:  # pylint: disable=broad-exception-caught
+          logger.warning(
+              'Failed to get interval metric details for window size %ss:'
+              ' %s',
+              window_size,
+              e,
+          )
+          results[window_size] = _empty_details(window_size)
+    finally:
+      self._interval_entries = all_entries
+
+    return results

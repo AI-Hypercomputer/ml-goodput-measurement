@@ -16,6 +16,8 @@ from google3.testing.pybase import googletest
 get_timestamp_from_log_entry = goodput_utils.get_timestamp_from_log_entry
 compute_ideal_step_time = goodput_utils.compute_ideal_step_time
 BadputType = goodput_utils.BadputType
+GoodputType = goodput_utils.GoodputType
+IntervalMetricType = goodput_utils.IntervalMetricType
 
 
 # Fake job timeline information for test purposes.
@@ -1796,6 +1798,172 @@ class BadputTest(googletest.TestCase):
     )
     self.assertEqual(
         computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION], 0
+    )
+
+  def test_interval_metric_details_for_windows_matches_individual_calls_with_single_fetch(
+      self,
+  ):
+    """get_interval_metric_details_for_windows should match per-window calls to get_interval_metric_details, but using a single Cloud Logging fetch instead of one fetch per window."""
+    job_start_time = _TEST_JOB_START_TIME
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    step_start_time = _TEST_STEP_START_TIME
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    job_end_time = step_start_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    now = job_end_time
+    total_job_seconds = int((now - job_start_time).total_seconds())
+    # A small window covering only the tail of the job, and a large window
+    # that's a strict superset covering the entire job timeline.
+    small_window = max(1, total_job_seconds // 2)
+    large_window = total_job_seconds + 100
+    window_sizes = [small_window, large_window]
+
+    # Independent calculator sharing the same underlying log entries, used
+    # to compute the expected per-window baseline without disturbing the
+    # calculator under test.
+    baseline_calculator = goodput.GoodputCalculator(
+        self.job_name, self.logger_name, self.mock_cloud_logger
+    )
+    expected_results = {}
+    for window_size in window_sizes:
+      window_start = now - datetime.timedelta(seconds=window_size)
+      expected_results[window_size] = (
+          baseline_calculator.get_interval_metric_details(window_start, now)
+      )
+
+    # Count the number of Cloud Logging fetches made by the batched API.
+    original_read = self.mock_cloud_logger.read_cloud_logging_entries
+    call_count = [0]
+
+    def _counting_read(*args, **kwargs):
+      call_count[0] += 1
+      return original_read(*args, **kwargs)
+
+    self.mock_cloud_logger.read_cloud_logging_entries = _counting_read
+    try:
+      batched_results = (
+          self.goodput_calculator.get_interval_metric_details_for_windows(
+              window_sizes, now
+          )
+      )
+    finally:
+      self.mock_cloud_logger.read_cloud_logging_entries = original_read
+
+    # A single fetch (for the largest window) covers every window size.
+    self.assertEqual(call_count[0], 1)
+    self.assertEqual(set(batched_results.keys()), set(window_sizes))
+    for window_size in window_sizes:
+      self.assertEqual(
+          batched_results[window_size][
+              IntervalMetricType.INTERVAL_SIZE.value
+          ],
+          window_size,
+      )
+      self.assertAlmostEqual(
+          batched_results[window_size][
+              IntervalMetricType.INTERVAL_GOODPUT.value
+          ][GoodputType.TOTAL],
+          expected_results[window_size][
+              IntervalMetricType.INTERVAL_GOODPUT.value
+          ][GoodputType.TOTAL],
+          delta=0.01,
+      )
+      self.assertEqual(
+          batched_results[window_size][
+              IntervalMetricType.INTERVAL_BADPUT.value
+          ].keys(),
+          expected_results[window_size][
+              IntervalMetricType.INTERVAL_BADPUT.value
+          ].keys(),
+      )
+
+  def test_interval_metric_details_for_windows_empty_list(self):
+    self.assertEqual(
+        self.goodput_calculator.get_interval_metric_details_for_windows(
+            [], datetime.datetime.now(datetime.timezone.utc)
+        ),
+        {},
+    )
+
+  def test_interval_metric_details_for_windows_no_entries(self):
+    """If even the largest window has no log entries, every window size should get an empty result without raising."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    results = self.goodput_calculator.get_interval_metric_details_for_windows(
+        [60, 120], now
+    )
+    self.assertEqual(set(results.keys()), {60, 120})
+    for window_size in (60, 120):
+      self.assertEqual(
+          results[window_size],
+          {
+              IntervalMetricType.INTERVAL_GOODPUT.value: {},
+              IntervalMetricType.INTERVAL_BADPUT.value: {},
+              IntervalMetricType.INTERVAL_SIZE.value: window_size,
+          },
+      )
+
+  def test_interval_metric_details_for_windows_isolates_non_value_error_failures(
+      self,
+  ):
+    """A non-ValueError failure computing one window size must not discard results already computed for other window sizes."""
+    job_start_time = _TEST_JOB_START_TIME
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    step_start_time = _TEST_STEP_START_TIME
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    job_end_time = step_start_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    now = job_end_time
+    total_job_seconds = int((now - job_start_time).total_seconds())
+    small_window = max(1, total_job_seconds // 2)
+    large_window = total_job_seconds + 100
+    large_window_start = now - datetime.timedelta(seconds=large_window)
+
+    original_compute = (
+        self.goodput_calculator._compute_job_goodput_interval_metrics
+    )
+
+    def _flaky_compute(interval_start, interval_end):
+      if interval_start == large_window_start:
+        raise RuntimeError('boom')
+      return original_compute(interval_start, interval_end)
+
+    self.goodput_calculator._compute_job_goodput_interval_metrics = (
+        _flaky_compute
+    )
+
+    results = self.goodput_calculator.get_interval_metric_details_for_windows(
+        [small_window, large_window], now
+    )
+
+    # The failing window falls back to empty details instead of raising.
+    self.assertEqual(
+        results[large_window],
+        {
+            IntervalMetricType.INTERVAL_GOODPUT.value: {},
+            IntervalMetricType.INTERVAL_BADPUT.value: {},
+            IntervalMetricType.INTERVAL_SIZE.value: large_window,
+        },
+    )
+    # The other window's results are unaffected.
+    self.assertIn(
+        GoodputType.TOTAL,
+        results[small_window][IntervalMetricType.INTERVAL_GOODPUT.value],
+    )
+    self.assertGreater(
+        results[small_window][IntervalMetricType.INTERVAL_GOODPUT.value][
+            GoodputType.TOTAL
+        ],
+        0,
     )
 
   def _generate_step_start_times(self, number_of_steps: int, start_time):

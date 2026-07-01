@@ -10,7 +10,7 @@ import math
 import multiprocessing
 from multiprocessing import synchronize
 import os
-import time
+import threading
 
 from cloud_goodput.ml_goodput_measurement.src import gcp_metrics
 from cloud_goodput.ml_goodput_measurement.src import goodput
@@ -39,7 +39,69 @@ _PROCESS_TERMINATION_TIMEOUT_SECONDS = 10
 logger = logging.getLogger(__name__)
 
 
-def _goodput_worker(config: dict, termination_event: synchronize.Event):
+def _query_and_upload_goodput_once(
+    calculator: GoodputCalculator,
+    summary_writer: writer.SummaryWriter,
+    metrics_sender: GCPMetrics | None,
+    config: dict,
+    pid: int,
+) -> None:
+  """Performs a single cumulative goodput query and upload cycle.
+
+  Used both by the periodic loop in _goodput_worker and for the final,
+  warm-cache flush performed just before the worker exits.
+  """
+  try:
+    job_goodput, job_badput, last_step = calculator.get_job_goodput(
+        include_badput_breakdown=config['include_badput_breakdown']
+    )
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        '[PID: %s] Error while querying goodput for job %s. Skipping this'
+        ' cycle. Error: %s',
+        pid,
+        config['job_name'],
+        e,
+    )
+    return
+
+  try:
+    _upload_goodput_metrics_to_tensorboard(
+        summary_writer,
+        job_goodput,
+        job_badput,
+        last_step,
+        config['include_badput_breakdown'],
+    )
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        '[PID: %s] Could not upload goodput metrics to Tensorboard for job'
+        ' %s. Error: %s',
+        pid,
+        config['job_name'],
+        e,
+    )
+
+  try:
+    if config['gcp_options'].enable_gcp_goodput_metrics and metrics_sender:
+      # Final attempt: get details from the calculator's state and upload
+      details = calculator.get_job_goodput_details()
+      _upload_goodput_metrics_to_gcm(metrics_sender, details, config)
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        '[PID: %s] Could not get details or upload metrics to Google Cloud'
+        ' Monitoring for job %s. Error: %s',
+        pid,
+        config['job_name'],
+        e,
+    )
+
+
+def _goodput_worker(
+    config: dict,
+    termination_event: synchronize.Event,
+    final_flush_event: synchronize.Event,
+):
   """Worker process for querying and uploading cumulative goodput."""
   pid = os.getpid()
   logger.info(
@@ -52,53 +114,22 @@ def _goodput_worker(config: dict, termination_event: synchronize.Event):
   summary_writer = _create_tensorboard_writer(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
-  while not termination_event.is_set():
-    time.sleep(config['upload_interval'])
-    # Query metrics and update the cache.
-    try:
-      job_goodput, job_badput, last_step = calculator.get_job_goodput(
-          include_badput_breakdown=config['include_badput_breakdown']
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Error while querying goodput for job %s. Skipping this'
-          ' cycle. Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
-      continue
+  while not termination_event.wait(timeout=config['upload_interval']):
+    _query_and_upload_goodput_once(
+        calculator, summary_writer, metrics_sender, config, pid
+    )
 
-    try:
-      _upload_goodput_metrics_to_tensorboard(
-          summary_writer,
-          job_goodput,
-          job_badput,
-          last_step,
-          config['include_badput_breakdown'],
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Could not upload goodput metrics to Tensorboard for job'
-          ' %s. Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
-
-    try:
-      if config['gcp_options'].enable_gcp_goodput_metrics and metrics_sender:
-        # Final attempt: get details from the calculator's state and upload
-        details = calculator.get_job_goodput_details()
-        _upload_goodput_metrics_to_gcm(metrics_sender, details, config)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Could not get details or upload metrics to Google Cloud'
-          ' Monitoring for job %s. Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
+  if final_flush_event.is_set():
+    # The calculator's cache is already warm from the loop above, so this
+    # final query only fetches entries written since the last cycle.
+    logger.info(
+        '[PID: %s] Performing final goodput query and upload for job: %s',
+        pid,
+        config['job_name'],
+    )
+    _query_and_upload_goodput_once(
+        calculator, summary_writer, metrics_sender, config, pid
+    )
 
   summary_writer.close()
   logger.info(
@@ -108,7 +139,62 @@ def _goodput_worker(config: dict, termination_event: synchronize.Event):
   )
 
 
-def _step_deviation_worker(config: dict, termination_event: synchronize.Event):
+def _query_and_upload_step_deviation_once(
+    calculator: GoodputCalculator,
+    summary_writer: writer.SummaryWriter,
+    metrics_sender: GCPMetrics | None,
+    config: dict,
+    pid: int,
+) -> None:
+  """Performs a single step deviation query and upload cycle.
+
+  Used both by the periodic loop in _step_deviation_worker and for the
+  final, warm-cache flush performed just before the worker exits.
+  """
+  try:
+    step_dev = calculator.get_step_deviation(
+        config['configured_ideal_step_time']
+    )
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        '[PID: %s] Error getting step deviation for job %s. Skipping this'
+        ' cycle. Error: %s',
+        pid,
+        config['job_name'],
+        e,
+    )
+    return
+  try:
+    _write_step_deviation_to_tensorboard(summary_writer, step_dev)
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        '[PID: %s] Could not write step deviation to Tensorboard for job %s.'
+        ' Error: %s',
+        pid,
+        config['job_name'],
+        e,
+    )
+  try:
+    if (
+        config['gcp_options'].enable_gcp_step_deviation_metrics
+        and metrics_sender
+    ):
+      _send_step_deviation_metric_to_gcp(metrics_sender, step_dev, config)
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        '[PID: %s] Could not send step deviation metric to GCP for job %s.'
+        ' Error: %s',
+        pid,
+        config['job_name'],
+        e,
+    )
+
+
+def _step_deviation_worker(
+    config: dict,
+    termination_event: synchronize.Event,
+    final_flush_event: synchronize.Event,
+):
   """Worker process for querying and uploading step deviation."""
   pid = os.getpid()
   logger.info(
@@ -121,45 +207,23 @@ def _step_deviation_worker(config: dict, termination_event: synchronize.Event):
   summary_writer = _create_tensorboard_writer(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
-  while not termination_event.is_set():
-    time.sleep(config['step_deviation_interval_seconds'])
-    try:
-      step_dev = calculator.get_step_deviation(
-          config['configured_ideal_step_time']
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Error getting step deviation for job %s. Skipping this'
-          ' cycle. Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
-      continue
-    try:
-      _write_step_deviation_to_tensorboard(summary_writer, step_dev)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Could not write step deviation to Tensorboard for job %s.'
-          ' Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
-    try:
-      if (
-          config['gcp_options'].enable_gcp_step_deviation_metrics
-          and metrics_sender
-      ):
-        _send_step_deviation_metric_to_gcp(metrics_sender, step_dev, config)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Could not send step deviation metric to GCP for job %s.'
-          ' Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
+  while not termination_event.wait(
+      timeout=config['step_deviation_interval_seconds']
+  ):
+    _query_and_upload_step_deviation_once(
+        calculator, summary_writer, metrics_sender, config, pid
+    )
+
+  if final_flush_event.is_set():
+    logger.info(
+        '[PID: %s] Performing final step deviation query and upload for'
+        ' job: %s',
+        pid,
+        config['job_name'],
+    )
+    _query_and_upload_step_deviation_once(
+        calculator, summary_writer, metrics_sender, config, pid
+    )
 
   summary_writer.close()
   logger.info(
@@ -169,7 +233,55 @@ def _step_deviation_worker(config: dict, termination_event: synchronize.Event):
   )
 
 
-def _rolling_window_worker(config: dict, termination_event: synchronize.Event):
+def _query_and_upload_rolling_window_once(
+    calculator: GoodputCalculator,
+    metrics_sender: GCPMetrics | None,
+    config: dict,
+    pid: int,
+) -> None:
+  """Performs a single rolling window goodput query and upload cycle.
+
+  Used both by the periodic loop in _rolling_window_worker and for the
+  final, warm-cache flush performed just before the worker exits. All
+  configured window sizes share the same end time, so a single fetch
+  covering the largest window is reused for every smaller window instead of
+  issuing one Cloud Logging fetch per window size.
+  """
+  now = datetime.datetime.now(datetime.timezone.utc)
+  try:
+    details_by_window = calculator.get_interval_metric_details_for_windows(
+        config['rolling_windows'], now
+    )
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        '[PID: %s] Error in rolling window query for job %s. Error: %s',
+        pid,
+        config['job_name'],
+        e,
+    )
+    return
+
+  for window_size, interval_metric_details in details_by_window.items():
+    try:
+      _upload_interval_goodput_metrics_to_gcm(
+          metrics_sender, interval_metric_details, config
+      )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.warning(
+          '[PID: %s] Error uploading rolling window (size: %ss) for job %s.'
+          ' Error: %s',
+          pid,
+          window_size,
+          config['job_name'],
+          e,
+      )
+
+
+def _rolling_window_worker(
+    config: dict,
+    termination_event: synchronize.Event,
+    final_flush_event: synchronize.Event,
+):
   """Worker process for querying and uploading rolling window goodput."""
   pid = os.getpid()
   logger.info(
@@ -180,35 +292,62 @@ def _rolling_window_worker(config: dict, termination_event: synchronize.Event):
   calculator = _create_goodput_calculator(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
-  while not termination_event.is_set():
-    time.sleep(config['upload_interval'])
-    now = datetime.datetime.now(datetime.timezone.utc)
-    for window_size in config['rolling_windows']:
-      try:
-        window_end = now
-        window_start = now - datetime.timedelta(seconds=window_size)
-        window_start = window_start.replace(tzinfo=datetime.timezone.utc)
-        interval_metric_details = calculator.get_interval_metric_details(
-            window_start, window_end
-        )
-        _upload_interval_goodput_metrics_to_gcm(
-            metrics_sender, interval_metric_details, config
-        )
-      except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.warning(
-            '[PID: %s] Error in rolling window (size: %ss) for job %s.'
-            ' Error: %s',
-            pid,
-            window_size,
-            config['job_name'],
-            e,
-        )
+  while not termination_event.wait(timeout=config['upload_interval']):
+    _query_and_upload_rolling_window_once(
+        calculator, metrics_sender, config, pid
+    )
+
+  if final_flush_event.is_set():
+    logger.info(
+        '[PID: %s] Performing final rolling window goodput query and upload'
+        ' for job: %s',
+        pid,
+        config['job_name'],
+    )
+    _query_and_upload_rolling_window_once(
+        calculator, metrics_sender, config, pid
+    )
 
   logger.info(
       '[PID: %s] Rolling window worker process for job %s stopped.',
       pid,
       config['job_name'],
   )
+
+
+def _run_with_timeout(
+    func,
+    timeout_seconds: float | None,
+    description: str,
+) -> None:
+  """Runs func, abandoning it if it does not complete within timeout_seconds.
+
+  If timeout_seconds is None, func is run synchronously with no timeout,
+  preserving the default blocking behavior. Otherwise func is run in a daemon
+  thread so that a slow or hung network call (e.g. fetching log entries or
+  uploading metrics) cannot block workload shutdown past timeout_seconds.
+
+  Args:
+    func: A zero-argument callable to run.
+    timeout_seconds: The maximum time to wait for func to complete, or None
+      to wait indefinitely.
+    description: A human-readable description of func, used for logging if
+      it is abandoned.
+  """
+  if timeout_seconds is None:
+    func()
+    return
+  thread = threading.Thread(target=func, daemon=True)
+  thread.start()
+  thread.join(timeout=timeout_seconds)
+  if thread.is_alive():
+    logger.warning(
+        '%s did not complete within %s seconds and will be abandoned to'
+        ' avoid blocking workload shutdown. The job may be missing its'
+        ' final goodput metrics upload.',
+        description,
+        timeout_seconds,
+    )
 
 
 def _create_goodput_calculator(config: dict) -> GoodputCalculator:
@@ -720,6 +859,9 @@ class GoodputMonitor:
       step_deviation_interval_seconds=10,
       gcp_options: GCPOptions = GCPOptions(),
       skip_final_flush: bool = False,
+      final_flush_timeout_seconds: (
+          float | None
+      ) = _PROCESS_TERMINATION_TIMEOUT_SECONDS,
   ):
     """Initializes the GoodputMonitor.
 
@@ -745,6 +887,18 @@ class GoodputMonitor:
       gcp_options: The options for Google Cloud Monitoring.
       skip_final_flush: Whether to skip the final goodput metrics flush upon
         termination.
+      final_flush_timeout_seconds: The maximum time to wait for the final
+        goodput metrics flush (query plus Tensorboard/GCM upload) to
+        complete upon termination. If an uploader process is running, this
+        is used as the join timeout so the worker has time to perform the
+        flush itself using its warm cache before exiting; if no uploader
+        process was ever started, it instead bounds a one-off cold query
+        run by the caller. Defaults to _PROCESS_TERMINATION_TIMEOUT_SECONDS.
+        If the flush does not complete within this timeout, it is abandoned
+        (and the worker, if any, is terminated) so that it does not block
+        workload shutdown (e.g. behind a multi-host termination barrier).
+        Pass None to block until the flush completes (the legacy behavior).
+        Has no effect if skip_final_flush is True.
     """
     if not monitoring_enabled:
       logger.info(
@@ -754,6 +908,7 @@ class GoodputMonitor:
       return
     self._initialized = True
     self._skip_final_flush = skip_final_flush
+    self._final_flush_timeout_seconds = final_flush_timeout_seconds
 
     self._goodput_calculator = GoodputCalculator(
         job_name=job_name,
@@ -804,12 +959,15 @@ class GoodputMonitor:
     # Process management attributes
     self._goodput_process = None
     self._goodput_termination_event = multiprocessing.Event()
+    self._goodput_final_flush_event = multiprocessing.Event()
 
     self._step_deviation_process = None
     self._step_deviation_termination_event = multiprocessing.Event()
+    self._step_deviation_final_flush_event = multiprocessing.Event()
 
     self._rolling_window_process = None
     self._rolling_window_termination_event = multiprocessing.Event()
+    self._rolling_window_final_flush_event = multiprocessing.Event()
 
   def __del__(self):
     if not getattr(self, '_initialized', False):
@@ -828,6 +986,22 @@ class GoodputMonitor:
     except Exception:  # pylint: disable=broad-except
       pass
 
+  def _worker_join_timeout(self, should_skip: bool) -> float | None:
+    """Returns the timeout to use when joining an uploader process.
+
+    When a final flush is requested, the worker performs it just before
+    exiting (see _goodput_worker et al.), so the join must wait long enough
+    to cover that query and upload too. final_flush_timeout_seconds is the
+    customer-facing knob for that combined wait. Otherwise (skip_final_flush),
+    there is no flush work to wait for, so the fixed process-termination
+    timeout applies.
+    """
+    if should_skip:
+      return _PROCESS_TERMINATION_TIMEOUT_SECONDS
+    return getattr(
+        self, '_final_flush_timeout_seconds', _PROCESS_TERMINATION_TIMEOUT_SECONDS
+    )
+
   def start_goodput_uploader(self):
     """Starts the goodput uploader process."""
     if not self._initialized:
@@ -839,9 +1013,14 @@ class GoodputMonitor:
       )
       return
     self._goodput_termination_event.clear()
+    self._goodput_final_flush_event.clear()
     self._goodput_process = multiprocessing.Process(
         target=_goodput_worker,
-        args=(self._worker_config, self._goodput_termination_event),
+        args=(
+            self._worker_config,
+            self._goodput_termination_event,
+            self._goodput_final_flush_event,
+        ),
         daemon=True,
     )
     self._goodput_process.start()
@@ -856,11 +1035,23 @@ class GoodputMonitor:
     if not self._initialized:
       return
 
+    should_skip = (
+        skip_final_flush
+        if skip_final_flush is not None
+        else getattr(self, '_skip_final_flush', False)
+    )
+    worker_was_running = self._goodput_process is not None
+
     if self._goodput_process:
       pid = self._goodput_process.pid
       logger.info('Shutting down cumulative goodput process (PID: %s)', pid)
+      # Perform final query and upload using its own warm cache before it exits.
+      if not should_skip:
+        self._goodput_final_flush_event.set()
       self._goodput_termination_event.set()
-      self._goodput_process.join(timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS)
+      self._goodput_process.join(
+          timeout=self._worker_join_timeout(should_skip)
+      )
       if self._goodput_process.is_alive():
         logger.warning(
             'Cumulative goodput process (PID: %s) did not exit gracefully.'
@@ -879,17 +1070,18 @@ class GoodputMonitor:
             exit_code,
         )
     self._goodput_process = None
-    should_skip = (
-        skip_final_flush
-        if skip_final_flush is not None
-        else getattr(self, '_skip_final_flush', False)
-    )
-    if not should_skip:
-      self._final_goodput_query_and_upload()
+    if not should_skip and not worker_was_running:
+      # No uploader process was ever started, so there is no warm cache to
+      # draw from. Fall back to a one-off query, bounded by
+      # final_flush_timeout_seconds.
+      _run_with_timeout(
+          self._final_goodput_query_and_upload,
+          getattr(self, '_final_flush_timeout_seconds', None),
+          f'Final goodput query and upload for job: {self._worker_config["job_name"]}',
+      )
 
   def _final_goodput_query_and_upload(self):
     """Performs final cumulative goodput query and uploads data to Tensorboard & GCM."""
-    time.sleep(self._worker_config['upload_interval'])
     try:
       calculator = self._goodput_calculator
       job_goodput, job_badput, last_step = calculator.get_job_goodput(
@@ -949,9 +1141,14 @@ class GoodputMonitor:
       )
       return
     self._step_deviation_termination_event.clear()
+    self._step_deviation_final_flush_event.clear()
     self._step_deviation_process = multiprocessing.Process(
         target=_step_deviation_worker,
-        args=(self._worker_config, self._step_deviation_termination_event),
+        args=(
+            self._worker_config,
+            self._step_deviation_termination_event,
+            self._step_deviation_final_flush_event,
+        ),
         daemon=True,
     )
     self._step_deviation_process.start()
@@ -966,13 +1163,22 @@ class GoodputMonitor:
     if not self._initialized:
       return
 
+    should_skip = (
+        skip_final_flush
+        if skip_final_flush is not None
+        else getattr(self, '_skip_final_flush', False)
+    )
+    worker_was_running = self._step_deviation_process is not None
+
     if self._step_deviation_process:
       pid = self._step_deviation_process.pid
       logger.info('Shutting down step deviation process (PID: %s)', pid)
 
+      if not should_skip:
+        self._step_deviation_final_flush_event.set()
       self._step_deviation_termination_event.set()
       self._step_deviation_process.join(
-          timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS
+          timeout=self._worker_join_timeout(should_skip)
       )
 
       if self._step_deviation_process.is_alive():
@@ -994,17 +1200,15 @@ class GoodputMonitor:
         )
 
     self._step_deviation_process = None
-    should_skip = (
-        skip_final_flush
-        if skip_final_flush is not None
-        else getattr(self, '_skip_final_flush', False)
-    )
-    if not should_skip:
-      self._final_step_deviation_query_and_upload()
+    if not should_skip and not worker_was_running:
+      _run_with_timeout(
+          self._final_step_deviation_query_and_upload,
+          getattr(self, '_final_flush_timeout_seconds', None),
+          f'Final step deviation query and upload for job: {self._worker_config["job_name"]}',
+      )
 
   def _final_step_deviation_query_and_upload(self):
     """Performs a final step deviation query and upload."""
-    time.sleep(self._worker_config['upload_interval'])
     try:
       calculator = self._goodput_calculator
       step_dev = calculator.get_step_deviation(
@@ -1045,9 +1249,14 @@ class GoodputMonitor:
       return
     self._worker_config['rolling_windows'] = rolling_windows_seconds
     self._rolling_window_termination_event.clear()
+    self._rolling_window_final_flush_event.clear()
     self._rolling_window_process = multiprocessing.Process(
         target=_rolling_window_worker,
-        args=(self._worker_config, self._rolling_window_termination_event),
+        args=(
+            self._worker_config,
+            self._rolling_window_termination_event,
+            self._rolling_window_final_flush_event,
+        ),
         daemon=True,
     )
     self._rolling_window_process.start()
@@ -1064,13 +1273,22 @@ class GoodputMonitor:
     if not self._initialized:
       return
 
+    should_skip = (
+        skip_final_flush
+        if skip_final_flush is not None
+        else getattr(self, '_skip_final_flush', False)
+    )
+    worker_was_running = self._rolling_window_process is not None
+
     if self._rolling_window_process:
       pid = self._rolling_window_process.pid
       logger.info('Shutting down rolling window process (PID: %s)', pid)
 
+      if not should_skip:
+        self._rolling_window_final_flush_event.set()
       self._rolling_window_termination_event.set()
       self._rolling_window_process.join(
-          timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS
+          timeout=self._worker_join_timeout(should_skip)
       )
 
       if self._rolling_window_process.is_alive():
@@ -1092,17 +1310,15 @@ class GoodputMonitor:
         )
 
     self._rolling_window_process = None
-    should_skip = (
-        skip_final_flush
-        if skip_final_flush is not None
-        else getattr(self, '_skip_final_flush', False)
-    )
-    if not should_skip:
-      self._final_rolling_window_goodput_query_and_upload()
+    if not should_skip and not worker_was_running:
+      _run_with_timeout(
+          self._final_rolling_window_goodput_query_and_upload,
+          getattr(self, '_final_flush_timeout_seconds', None),
+          f'Final rolling window goodput query and upload for job: {self._worker_config["job_name"]}',
+      )
 
   def _final_rolling_window_goodput_query_and_upload(self):
     """Performs a finalrolling window goodput query and upload."""
-    time.sleep(self._worker_config['upload_interval'])
     try:
       calculator = self._goodput_calculator
       metrics_sender = self._metrics_sender

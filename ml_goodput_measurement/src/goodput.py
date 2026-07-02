@@ -643,8 +643,8 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     self._interval_end_time = None
     self._number_of_interruptions = 0
     self._gcm_last_recorded_timestamp = None
-    self._last_disruption_time = None
-    self._last_disrupted_step = None
+    self._last_disruption_time = None  # pyrefly: ignore[bad-assignment]
+    self._last_disrupted_step = None  # pyrefly: ignore[bad-assignment]
 
   def _get_total_productive_and_unproductive_time(
       self, new_entries: list[dict[str, Any]]

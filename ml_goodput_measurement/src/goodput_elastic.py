@@ -256,13 +256,13 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
           if 'scale_up' in etype.lower()
           else goodput_utils.BadputType.ELASTIC_SLICE_DOWN
       )
-      unproductive_time[bt] = unproductive_time.get(bt, 0.0) + duration
+      unproductive_time[bt] = unproductive_time.get(bt, 0.0) + duration  # pyrefly: ignore[unsupported-operation]
 
     # Badput from ELASTIC_REINITIALIZATION.
     reinit_intervals = self._extract_elastic_reinit_intervals(entries)
     for start, end in reinit_intervals:
       unproductive_time[goodput_utils.BadputType.ELASTIC_REINITIALIZATION] = (
-          unproductive_time.get(
+          unproductive_time.get(  # pyrefly: ignore[unsupported-operation]
               goodput_utils.BadputType.ELASTIC_REINITIALIZATION, 0.0
           )
           + (end - start)
@@ -278,7 +278,7 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
       ):
         overlap = self._overlap_with_reinit(intervals, reinit_intervals)
         if overlap > 0 and bt in unproductive_time:
-          unproductive_time[bt] = max(0.0, unproductive_time[bt] - overlap)
+          unproductive_time[bt] = max(0.0, unproductive_time[bt] - overlap)  # pyrefly: ignore[unsupported-operation]
 
     return productive_time, unproductive_time, max_step, last_step
 
@@ -317,10 +317,10 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
               interval_end.timestamp(),
           )
       )
-      result['stepping_slice_efficiency'] = stepping_slice_efficiency
-      result['available_slice_efficiency'] = available_slice_efficiency
+      result['stepping_slice_efficiency'] = stepping_slice_efficiency  # pyrefly: ignore[bad-typed-dict-key]
+      result['available_slice_efficiency'] = available_slice_efficiency  # pyrefly: ignore[bad-typed-dict-key]
 
-    return result
+    return result  # pyrefly: ignore[bad-return]
 
   def get_job_goodput_details(
       self,
@@ -342,6 +342,6 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
             job_start_time.timestamp(),
             end_ts,
         )
-        result['stepping_slice_efficiency'] = stepping_eff
-        result['available_slice_efficiency'] = available_eff
-    return result
+        result['stepping_slice_efficiency'] = stepping_eff  # pyrefly: ignore[bad-typed-dict-key]
+        result['available_slice_efficiency'] = available_eff  # pyrefly: ignore[bad-typed-dict-key]
+    return result  # pyrefly: ignore[bad-return]

@@ -237,7 +237,7 @@ def compute_step_deviation_from_baseline(
   total_steps = len(deviations)
 
   if total_steps < _DEFAULT_RECENT_WINDOW_SIZE:
-    return np.mean(deviations)
+    return np.mean(deviations)  # pyrefly: ignore[bad-return]
 
   if mode == MonitoringWindowType.INTERVAL:
     recent_deviations = deviations[-recent_window_size:]
@@ -278,7 +278,7 @@ def compute_ideal_step_time(step_times: list[float]) -> Optional[float]:
   normal_step_times = [
       step_time for step_time in step_times if step_time <= (med + mad * 3)
   ]
-  return np.mean(normal_step_times) if normal_step_times else None
+  return np.mean(normal_step_times) if normal_step_times else None  # pyrefly: ignore[bad-return]
 
 
 def get_anomalous_and_normal_step_times(

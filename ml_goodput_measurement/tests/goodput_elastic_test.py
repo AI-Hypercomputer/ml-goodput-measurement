@@ -50,7 +50,7 @@ class ElasticGoodputTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-run'
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-log'
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput_elastic.ElasticGoodputRecorder(
@@ -166,7 +166,7 @@ class ElasticGoodputCalculatorTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-run'
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-log'
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput_elastic.ElasticGoodputRecorder(

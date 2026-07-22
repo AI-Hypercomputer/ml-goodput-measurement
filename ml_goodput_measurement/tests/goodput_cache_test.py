@@ -15,7 +15,8 @@ class GoodputCacheTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.goodput_cache = goodput_cache.GoodputCache()
+    self.job_name = f'test-cache-run-{self.id().split(".")[-1]}'
+    self.goodput_cache = goodput_cache.GoodputCache(job_name=self.job_name)
 
   def test_update_cached_entries(self):
     mock_entries = [

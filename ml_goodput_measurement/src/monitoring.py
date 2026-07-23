@@ -52,8 +52,7 @@ def _goodput_worker(config: dict, termination_event: synchronize.Event):
   summary_writer = _create_tensorboard_writer(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
-  while not termination_event.is_set():
-    time.sleep(config['upload_interval'])
+  while not termination_event.wait(timeout=config['upload_interval']):
     # Query metrics and update the cache.
     try:
       job_goodput, job_badput, last_step = calculator.get_job_goodput(
@@ -121,8 +120,7 @@ def _step_deviation_worker(config: dict, termination_event: synchronize.Event):
   summary_writer = _create_tensorboard_writer(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
-  while not termination_event.is_set():
-    time.sleep(config['step_deviation_interval_seconds'])
+  while not termination_event.wait(timeout=config['step_deviation_interval_seconds']):
     try:
       step_dev = calculator.get_step_deviation(
           config['configured_ideal_step_time']
@@ -180,8 +178,7 @@ def _rolling_window_worker(config: dict, termination_event: synchronize.Event):
   calculator = _create_goodput_calculator(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
-  while not termination_event.is_set():
-    time.sleep(config['upload_interval'])
+  while not termination_event.wait(timeout=config['upload_interval']):
     now = datetime.datetime.now(datetime.timezone.utc)
     for window_size in config['rolling_windows']:
       try:

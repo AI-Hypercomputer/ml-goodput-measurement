@@ -233,50 +233,6 @@ def _step_deviation_worker(
   )
 
 
-def _query_and_upload_rolling_window_once(
-    calculator: GoodputCalculator,
-    metrics_sender: GCPMetrics | None,
-    config: dict,
-    pid: int,
-) -> None:
-  """Performs a single rolling window goodput query and upload cycle.
-
-  Used both by the periodic loop in _rolling_window_worker and for the
-  final, warm-cache flush performed just before the worker exits. All
-  configured window sizes share the same end time, so a single fetch
-  covering the largest window is reused for every smaller window instead of
-  issuing one Cloud Logging fetch per window size.
-  """
-  now = datetime.datetime.now(datetime.timezone.utc)
-  try:
-    details_by_window = calculator.get_interval_metric_details_for_windows(
-        config['rolling_windows'], now
-    )
-  except Exception as e:  # pylint: disable=broad-exception-caught
-    logger.warning(
-        '[PID: %s] Error in rolling window query for job %s. Error: %s',
-        pid,
-        config['job_name'],
-        e,
-    )
-    return
-
-  for window_size, interval_metric_details in details_by_window.items():
-    try:
-      _upload_interval_goodput_metrics_to_gcm(
-          metrics_sender, interval_metric_details, config
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Error uploading rolling window (size: %ss) for job %s.'
-          ' Error: %s',
-          pid,
-          window_size,
-          config['job_name'],
-          e,
-      )
-
-
 def _rolling_window_worker(
     config: dict,
     termination_event: synchronize.Event,
@@ -293,9 +249,26 @@ def _rolling_window_worker(
   metrics_sender = _create_gcp_metrics_sender(config)
 
   while not termination_event.wait(timeout=config['upload_interval']):
-    _query_and_upload_rolling_window_once(
-        calculator, metrics_sender, config, pid
-    )
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for window_size in config['rolling_windows']:
+      try:
+        window_start = now - datetime.timedelta(seconds=window_size)
+        window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+        interval_metric_details = calculator.get_interval_metric_details(
+            window_start, now
+        )
+        _upload_interval_goodput_metrics_to_gcm(
+            metrics_sender, interval_metric_details, config
+        )
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning(
+            '[PID: %s] Error in rolling window (size: %ss) for job %s.'
+            ' Error: %s',
+            pid,
+            window_size,
+            config['job_name'],
+            e,
+        )
 
   if final_flush_event.is_set():
     logger.info(
@@ -304,9 +277,26 @@ def _rolling_window_worker(
         pid,
         config['job_name'],
     )
-    _query_and_upload_rolling_window_once(
-        calculator, metrics_sender, config, pid
-    )
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for window_size in config['rolling_windows']:
+      try:
+        window_start = now - datetime.timedelta(seconds=window_size)
+        window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+        interval_metric_details = calculator.get_interval_metric_details(
+            window_start, now
+        )
+        _upload_interval_goodput_metrics_to_gcm(
+            metrics_sender, interval_metric_details, config
+        )
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning(
+            '[PID: %s] Error in rolling window (size: %ss) for job %s.'
+            ' Error: %s',
+            pid,
+            window_size,
+            config['job_name'],
+            e,
+        )
 
   logger.info(
       '[PID: %s] Rolling window worker process for job %s stopped.',

@@ -115,26 +115,9 @@ def _goodput_worker(
   metrics_sender = _create_gcp_metrics_sender(config)
 
   while not termination_event.wait(timeout=config['upload_interval']):
-<<<<<<< HEAD
     _query_and_upload_goodput_once(
         calculator, summary_writer, metrics_sender, config, pid
     )
-=======
-    # Query metrics and update the cache.
-    try:
-      job_goodput, job_badput, last_step = calculator.get_job_goodput(
-          include_badput_breakdown=config['include_badput_breakdown']
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Error while querying goodput for job %s. Skipping this'
-          ' cycle. Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
-      continue
->>>>>>> 8bb65fa (Split PR#9)
 
   if final_flush_event.is_set():
     # The calculator's cache is already warm from the loop above, so this
@@ -224,7 +207,6 @@ def _step_deviation_worker(
   summary_writer = _create_tensorboard_writer(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
-<<<<<<< HEAD
   while not termination_event.wait(
       timeout=config['step_deviation_interval_seconds']
   ):
@@ -242,46 +224,6 @@ def _step_deviation_worker(
     _query_and_upload_step_deviation_once(
         calculator, summary_writer, metrics_sender, config, pid
     )
-=======
-  while not termination_event.wait(timeout=config['step_deviation_interval_seconds']):
-    try:
-      step_dev = calculator.get_step_deviation(
-          config['configured_ideal_step_time']
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Error getting step deviation for job %s. Skipping this'
-          ' cycle. Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
-      continue
-    try:
-      _write_step_deviation_to_tensorboard(summary_writer, step_dev)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Could not write step deviation to Tensorboard for job %s.'
-          ' Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
-    try:
-      if (
-          config['gcp_options'].enable_gcp_step_deviation_metrics
-          and metrics_sender
-      ):
-        _send_step_deviation_metric_to_gcp(metrics_sender, step_dev, config)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning(
-          '[PID: %s] Could not send step deviation metric to GCP for job %s.'
-          ' Error: %s',
-          pid,
-          config['job_name'],
-          e,
-      )
->>>>>>> 8bb65fa (Split PR#9)
 
   summary_writer.close()
   logger.info(
@@ -351,7 +293,6 @@ def _rolling_window_worker(
   metrics_sender = _create_gcp_metrics_sender(config)
 
   while not termination_event.wait(timeout=config['upload_interval']):
-<<<<<<< HEAD
     _query_and_upload_rolling_window_once(
         calculator, metrics_sender, config, pid
     )
@@ -366,29 +307,6 @@ def _rolling_window_worker(
     _query_and_upload_rolling_window_once(
         calculator, metrics_sender, config, pid
     )
-=======
-    now = datetime.datetime.now(datetime.timezone.utc)
-    for window_size in config['rolling_windows']:
-      try:
-        window_end = now
-        window_start = now - datetime.timedelta(seconds=window_size)
-        window_start = window_start.replace(tzinfo=datetime.timezone.utc)
-        interval_metric_details = calculator.get_interval_metric_details(
-            window_start, window_end
-        )
-        _upload_interval_goodput_metrics_to_gcm(
-            metrics_sender, interval_metric_details, config
-        )
-      except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.warning(
-            '[PID: %s] Error in rolling window (size: %ss) for job %s.'
-            ' Error: %s',
-            pid,
-            window_size,
-            config['job_name'],
-            e,
-        )
->>>>>>> 8bb65fa (Split PR#9)
 
   logger.info(
       '[PID: %s] Rolling window worker process for job %s stopped.',

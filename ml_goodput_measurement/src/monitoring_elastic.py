@@ -32,6 +32,9 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
       final_flush_timeout_seconds: (
           float | None
       ) = monitoring._PROCESS_TERMINATION_TIMEOUT_SECONDS,
+      cache_dir: str | None = '/tmp',
+      gcs_cache_path: str | None = None,
+      gcs_sync_interval_seconds: int = 3600,
   ):
     super().__init__(
         job_name=job_name,
@@ -47,6 +50,9 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
         gcp_options=gcp_options,
         skip_final_flush=skip_final_flush,
         final_flush_timeout_seconds=final_flush_timeout_seconds,
+        cache_dir=cache_dir,
+        gcs_cache_path=gcs_cache_path,
+        gcs_sync_interval_seconds=gcs_sync_interval_seconds,
     )
     if self._initialized:
       # Replace base calculator with elastic-aware one.
@@ -54,6 +60,9 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
           job_name=job_name,
           logger_name=logger_name,
           using_pathways=True,
+          cache_dir=cache_dir,
+          gcs_cache_path=gcs_cache_path,
+          cache_key='goodput',
       )
       self._worker_config['calculator_class'] = (
           goodput_elastic.ElasticGoodputCalculator

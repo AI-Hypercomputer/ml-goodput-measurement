@@ -11,6 +11,7 @@ import multiprocessing
 from multiprocessing import synchronize
 import os
 import threading
+import time
 
 from cloud_goodput.ml_goodput_measurement.src import gcp_metrics
 from cloud_goodput.ml_goodput_measurement.src import goodput
@@ -110,14 +111,21 @@ def _goodput_worker(
       config['job_name'],
   )
 
-  calculator = _create_goodput_calculator(config)
+  calculator = _create_goodput_calculator(config, cache_key='goodput')
   summary_writer = _create_tensorboard_writer(config)
   metrics_sender = _create_gcp_metrics_sender(config)
+
+  gcs_sync_interval = config.get('gcs_sync_interval_seconds', 3600)
+  last_gcs_sync = time.monotonic()
 
   while not termination_event.wait(timeout=config['upload_interval']):
     _query_and_upload_goodput_once(
         calculator, summary_writer, metrics_sender, config, pid
     )
+    now = time.monotonic()
+    if now - last_gcs_sync >= gcs_sync_interval:
+      calculator.sync_to_gcs()
+      last_gcs_sync = now
 
   if final_flush_event.is_set():
     # The calculator's cache is already warm from the loop above, so this
@@ -203,7 +211,7 @@ def _step_deviation_worker(
       config['job_name'],
   )
 
-  calculator = _create_goodput_calculator(config)
+  calculator = _create_goodput_calculator(config, cache_key='step_dev')
   summary_writer = _create_tensorboard_writer(config)
   metrics_sender = _create_gcp_metrics_sender(config)
 
@@ -289,7 +297,7 @@ def _rolling_window_worker(
       pid,
       config['job_name'],
   )
-  calculator = _create_goodput_calculator(config)
+  calculator = _create_goodput_calculator(config, cache_key='rolling')
   metrics_sender = _create_gcp_metrics_sender(config)
 
   while not termination_event.wait(timeout=config['upload_interval']):
@@ -350,13 +358,18 @@ def _run_with_timeout(
     )
 
 
-def _create_goodput_calculator(config: dict) -> GoodputCalculator:
+def _create_goodput_calculator(
+    config: dict, cache_key: str = ''
+) -> GoodputCalculator:
   """Creates a GoodputCalculator instance from the shared config."""
   calculator_class = config.get('calculator_class', GoodputCalculator)
   return calculator_class(
       job_name=config['job_name'],
       logger_name=config['logger_name'],
       using_pathways=config['pathway_enabled'],
+      cache_dir=config.get('cache_dir', '/tmp'),
+      gcs_cache_path=config.get('gcs_cache_path'),
+      cache_key=cache_key,
   )
 
 
@@ -862,6 +875,9 @@ class GoodputMonitor:
       final_flush_timeout_seconds: (
           float | None
       ) = _PROCESS_TERMINATION_TIMEOUT_SECONDS,
+      cache_dir: str | None = '/tmp',
+      gcs_cache_path: str | None = None,
+      gcs_sync_interval_seconds: int = 3600,
   ):
     """Initializes the GoodputMonitor.
 
@@ -899,6 +915,14 @@ class GoodputMonitor:
         workload shutdown (e.g. behind a multi-host termination barrier).
         Pass None to block until the flush completes (the legacy behavior).
         Has no effect if skip_final_flush is True.
+      cache_dir: Local directory for the file-backed entry cache. Defaults to
+        '/tmp'. Set to None to use in-memory caching only.
+      gcs_cache_path: GCS URI (gs://bucket/prefix) for syncing the goodput
+        worker's local cache. Defaults to tensorboard_dir + '/goodput_cache'
+        when tensorboard_dir is a GCS URI, so no extra configuration is needed
+        for GCS-backed training jobs. Set to None to disable GCS sync.
+      gcs_sync_interval_seconds: How often (in seconds) the goodput worker
+        uploads its local cache files to GCS. Defaults to 3600.
     """
     if not monitoring_enabled:
       logger.info(
@@ -910,10 +934,19 @@ class GoodputMonitor:
     self._skip_final_flush = skip_final_flush
     self._final_flush_timeout_seconds = final_flush_timeout_seconds
 
+    # When tensorboard_dir is a GCS URI and no explicit cache path was given,
+    # default to a sibling directory of the TensorBoard subdirs so the cache
+    # lives in the same bucket without any extra configuration.
+    if gcs_cache_path is None and tensorboard_dir.startswith('gs://'):
+      gcs_cache_path = tensorboard_dir.rstrip('/') + '/goodput_cache'
+
     self._goodput_calculator = GoodputCalculator(
         job_name=job_name,
         logger_name=logger_name,
         using_pathways=pathway_enabled,
+        cache_dir=cache_dir,
+        gcs_cache_path=gcs_cache_path,
+        cache_key='goodput',
     )
     tensorboard_path = os.path.join(tensorboard_dir, _TENSORBOARD_GCS_SUBDIR)
     self._writer = writer.SummaryWriter(tensorboard_path)
@@ -954,6 +987,9 @@ class GoodputMonitor:
         'gcp_options': gcp_options,
         'rolling_windows': [],
         'calculator_class': GoodputCalculator,
+        'cache_dir': cache_dir,
+        'gcs_cache_path': gcs_cache_path,
+        'gcs_sync_interval_seconds': gcs_sync_interval_seconds,
     }
 
     # Process management attributes

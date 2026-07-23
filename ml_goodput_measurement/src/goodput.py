@@ -614,6 +614,9 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       cloud_logger: Optional[_CloudLogger] = None,
       using_pathways: bool = False,
       max_logs_retention_period: Optional[datetime.timedelta] = None,
+      cache_dir: Optional[str] = '/tmp',
+      gcs_cache_path: Optional[str] = None,
+      cache_key: str = '',
   ):
     """GoodputCalculator constructor.
 
@@ -624,6 +627,12 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       using_pathways: Whether or not the job uses Pathways.
       max_logs_retention_period: Optional retention period for query of Cloud
         Logging entries.
+      cache_dir: Local directory for the file-backed entry cache. Set to None
+        to use in-memory caching (original behavior). Defaults to '/tmp'.
+      gcs_cache_path: GCS URI (gs://bucket/prefix) to sync the cache to. If
+        set, the cache is uploaded periodically and restored on cold restart.
+      cache_key: Suffix added to cache filenames to disambiguate multiple
+        GoodputCalculator instances for the same job.
     """
     self.job_name = job_name
     self.using_pathways = using_pathways
@@ -635,8 +644,12 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           logger_name,
           max_logs_retention_period=max_logs_retention_period,
       )
-    self._current_entries = []
-    self._goodput_cache = GoodputCache()
+    self._goodput_cache = GoodputCache(
+        job_name=job_name,
+        cache_dir=cache_dir,
+        gcs_cache_path=gcs_cache_path,
+        cache_key=cache_key,
+    )
     self._goodput_cache_lock = threading.Lock()
     self._interval_entries = []
     self._interval_start_time = None
@@ -1277,32 +1290,30 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
 
   def _fetch_new_entries(self, query_time: datetime.datetime) -> list[Any]:
     """Thread-safe helper function to update and return new log entries."""
-    new_entries = []
-    current_last_entry_info = None
     with self._goodput_cache_lock:
-      if not self._goodput_cache.is_cache_empty():
-        cached_last_entry_info = self._goodput_cache.get_last_entry_info()
-        if cached_last_entry_info:
-          cached_last_entry_ts, _ = cached_last_entry_info
-          if (
-              cached_last_entry_ts is not None
-              and query_time <= cached_last_entry_ts
-          ):
-            return []
+      cached_last_entry_info = self._goodput_cache.get_last_entry_info()
 
-          new_entries, current_last_entry_info = (
-              self._cloud_logger.read_cloud_logging_entries(
-                  start_time=cached_last_entry_ts,
-                  end_time=query_time,
-                  last_entry_info=cached_last_entry_info,
-              )
-          )
+      # On a true cold start (no cursor, no local file), try GCS restore first.
+      if cached_last_entry_info is None and self._goodput_cache.is_cache_empty():
+        self._goodput_cache.restore_from_gcs()
+        cached_last_entry_info = self._goodput_cache.get_last_entry_info()
+
+      if cached_last_entry_info is not None:
+        cached_last_entry_ts, _ = cached_last_entry_info
+        if query_time <= cached_last_entry_ts:
+          return []
+        new_entries, current_last_entry_info = (
+            self._cloud_logger.read_cloud_logging_entries(
+                start_time=cached_last_entry_ts,
+                end_time=query_time,
+                last_entry_info=cached_last_entry_info,
+            )
+        )
       else:
         new_entries, current_last_entry_info = (
             self._cloud_logger.read_cloud_logging_entries()
         )
 
-      # Update the cache with the new log entries.
       self._goodput_cache.update_cached_entries(
           new_entries, current_last_entry_info
       )
@@ -1413,6 +1424,11 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         self._interval_end_time.timestamp()
         - self._interval_start_time.timestamp()
     )
+
+  def sync_to_gcs(self) -> None:
+    """Upload the local entry cache and cursor to GCS (no-op if not configured)."""
+    with self._goodput_cache_lock:
+      self._goodput_cache.sync_to_gcs()
 
   def get_job_goodput(
       self,

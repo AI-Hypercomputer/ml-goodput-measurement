@@ -50,6 +50,22 @@ class ElasticGoodputMonitorTests(absltest.TestCase):
     )
     return ts
 
+  def _compare_timeseries_ignore_time(self, expected_ts, actual_ts) -> bool:
+    if expected_ts.metric.type != actual_ts.metric.type:
+      return False
+    if dict(expected_ts.metric.labels) != dict(actual_ts.metric.labels):
+      return False
+    if expected_ts.resource.type != actual_ts.resource.type:
+      return False
+    if dict(expected_ts.resource.labels) != dict(actual_ts.resource.labels):
+      return False
+    if len(expected_ts.points) != len(actual_ts.points):
+      return False
+    for p1, p2 in zip(expected_ts.points, actual_ts.points):
+      if p1.value != p2.value:
+        return False
+    return True
+
   def _compare_calls_ignore_time_series(
       self, expected_call, actual_call
   ) -> bool:
@@ -62,8 +78,13 @@ class ElasticGoodputMonitorTests(absltest.TestCase):
     for key, expected_value in expected_call.kwargs.items():
       actual_value = actual_call.kwargs[key]
       if key == 'time_series':
-        continue
-      if expected_value != actual_value:
+        for exp_ts in expected_value:
+          if not any(
+              self._compare_timeseries_ignore_time(exp_ts, act_ts)
+              for act_ts in actual_value
+          ):
+            return False
+      elif expected_value != actual_value:
         return False
 
     return True
@@ -214,7 +235,154 @@ class ElasticGoodputMonitorTests(absltest.TestCase):
           f'Expected call not found: {expected_call}',
       )
 
+  @patch('google.cloud.monitoring_v3.MetricServiceClient')
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_upload_goodput_metrics_to_gcm_slice_efficiency(
+      self,
+      mock_logging_client,
+      mock_summary_writer,
+      mock_metric_service_client,
+  ):
+    monitor = self._setup_mock_elastic_goodput_monitor(
+        mock_logging_client, mock_summary_writer, mock_metric_service_client
+    )
+    mock_client = mock_metric_service_client.return_value
 
+    monitor._goodput_calculator.get_job_goodput_details = MagicMock(
+        return_value={
+            MetricType.GOODPUT_TIME.value: {
+                GoodputType.TOTAL: 10.0,
+            },
+            MetricType.BADPUT_TIME.value: {
+                BadputType.ELASTIC_SLICE_DOWN: 2.0,
+            },
+            MetricType.DISRUPTION_COUNT.value: 0,
+            MetricType.MAX_PRODUCTIVE_STEP.value: 2,
+            MetricType.TOTAL_ELAPSED_TIME.value: 20.0,
+            MetricType.STEP_TIME_DEVIATION.value: {},
+            MetricType.IDEAL_STEP_TIME.value: 1.0,
+            'stepping_slice_efficiency': 0.8,
+            'available_slice_efficiency': 0.9,
+        }
+    )
+
+    details = monitor._goodput_calculator.get_job_goodput_details()
+    monitoring._upload_goodput_metrics_to_gcm(
+        monitor._metrics_sender,
+        details,
+        monitor._worker_config,
+    )
+
+    expected_calls = [
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/stepping_slice_efficiency',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                        'rolling_window_size': '0',
+                    },
+                    0.8,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/available_slice_efficiency',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'window_type': 'CUMULATIVE',
+                        'rolling_window_size': '0',
+                    },
+                    0.9,
+                )
+            ],
+        ),
+    ]
+
+    actual_calls = mock_client.create_time_series.call_args_list
+
+    for expected_call in expected_calls:
+      self.assertTrue(
+          any(
+              self._compare_calls_ignore_time_series(expected_call, actual)
+              for actual in actual_calls
+          ),
+          f'Expected call not found: {expected_call}',
+      )
+
+  @patch('google.cloud.monitoring_v3.MetricServiceClient')
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_upload_interval_goodput_metrics_to_gcm_slice_efficiency(
+      self,
+      mock_logging_client,
+      mock_summary_writer,
+      mock_metric_service_client,
+  ):
+    monitor = self._setup_mock_elastic_goodput_monitor(
+        mock_logging_client, mock_summary_writer, mock_metric_service_client
+    )
+    mock_client = mock_metric_service_client.return_value
+
+    interval_metric_details = {
+        IntervalMetricType.INTERVAL_SIZE.value: 3600,
+        'stepping_slice_efficiency': 0.85,
+        'available_slice_efficiency': 0.95,
+    }
+
+    monitoring._upload_interval_goodput_metrics_to_gcm(
+        monitor._metrics_sender,
+        interval_metric_details,
+        monitor._worker_config,
+    )
+
+    expected_calls = [
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/stepping_slice_efficiency',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'rolling_window_size': '3600',
+                        'window_type': 'INTERVAL',
+                    },
+                    0.85,
+                )
+            ],
+        ),
+        mock.call.create_time_series(
+            name='projects/test-project',
+            time_series=[
+                self._create_timeseries(
+                    'compute.googleapis.com/workload/available_slice_efficiency',
+                    {
+                        'accelerator_type': 'test-acc-type',
+                        'rolling_window_size': '3600',
+                        'window_type': 'INTERVAL',
+                    },
+                    0.95,
+                )
+            ],
+        ),
+    ]
+
+    actual_calls = mock_client.create_time_series.call_args_list
+
+    for expected_call in expected_calls:
+      self.assertTrue(
+          any(
+              self._compare_calls_ignore_time_series(expected_call, actual)
+              for actual in actual_calls
+          ),
+          f'Expected call not found: {expected_call}',
+      )
 
 if __name__ == '__main__':
   absltest.main()

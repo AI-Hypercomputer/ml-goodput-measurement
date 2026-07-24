@@ -613,6 +613,8 @@ def _upload_goodput_metrics_to_gcm(
               'value_type': ValueType.DOUBLE,
               'metric_labels': _build_labels({
                   'accelerator_type': gcp_options.acc_type,
+                  'window_type': 'CUMULATIVE',
+                  'rolling_window_size': '0',
               }),
               'resource_type': 'compute.googleapis.com/Workload',
               'resource_labels': {
@@ -622,7 +624,7 @@ def _upload_goodput_metrics_to_gcm(
               },
           })
     # TODO(b/519328677): Enable after metrics rollout
-    # gcm_metrics.extend(slice_efficiency_metrics)
+    gcm_metrics.extend(slice_efficiency_metrics)
 
     # Send metrics to Google Cloud Monitoring.
     if metrics_sender and gcm_metrics:
@@ -803,6 +805,7 @@ def _upload_interval_goodput_metrics_to_gcm(
               'metric_labels': _build_labels({
                   'accelerator_type': gcp_options.acc_type,
                   'rolling_window_size': str(window_size),
+                  'window_type': 'INTERVAL',
               }),
               'resource_type': 'compute.googleapis.com/Workload',
               'resource_labels': {
@@ -812,7 +815,7 @@ def _upload_interval_goodput_metrics_to_gcm(
               },
           })
     # TODO(b/519328677): Enable after metrics rollout
-    # gcm_metrics.extend(slice_efficiency_metrics)
+    gcm_metrics.extend(slice_efficiency_metrics)
 
     if metrics_sender and gcm_metrics:
       log_context = {

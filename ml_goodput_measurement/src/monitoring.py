@@ -258,7 +258,7 @@ def _rolling_window_worker(
             window_start, now
         )
         _upload_interval_goodput_metrics_to_gcm(
-            metrics_sender, interval_metric_details, config
+            metrics_sender, interval_metric_details, config  # pyrefly: ignore[bad-argument-type]
         )
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.warning(
@@ -286,7 +286,7 @@ def _rolling_window_worker(
             window_start, now
         )
         _upload_interval_goodput_metrics_to_gcm(
-            metrics_sender, interval_metric_details, config
+            metrics_sender, interval_metric_details, config  # pyrefly: ignore[bad-argument-type]
         )
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.warning(

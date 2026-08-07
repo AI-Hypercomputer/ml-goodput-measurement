@@ -21,6 +21,14 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.2.2] - 2026-08-06
+
+### Added
+
+* Enable GCM upload for slice efficiency metrics.
+* Optimize final Goodput flush during shutdown (`skip_final_flush` enhancements).
+* Support for PW elasticity badput tracking.
+
 ## [0.2.0] - 2026-06-12
 
 ### Changed
@@ -149,6 +157,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.2.2]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.16...v0.2.0
 [0.0.16]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.15...v0.0.16
 [0.0.15]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.14...v0.0.15

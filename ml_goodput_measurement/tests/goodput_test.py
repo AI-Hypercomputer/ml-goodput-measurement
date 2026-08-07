@@ -155,8 +155,9 @@ class GoodputTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-run'
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-log'
+    self.temp_dir = self.create_tempdir().full_path
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput.GoodputRecorder(
         self.job_name,
@@ -165,7 +166,10 @@ class GoodputTest(googletest.TestCase):
         self.mock_cloud_logger,
     )
     self.goodput_calculator = goodput.GoodputCalculator(
-        self.job_name, self.logger_name, self.mock_cloud_logger
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.temp_dir,
     )
 
   def _mock_sample_program(self):
@@ -360,8 +364,9 @@ class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-run'
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-log'
+    self.temp_dir = self.create_tempdir().full_path
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput.GoodputRecorder(
         self.job_name,
@@ -370,7 +375,10 @@ class GoodputDisruptionCompleteRestartTest(googletest.TestCase):
         self.mock_cloud_logger,
     )
     self.goodput_calculator = goodput.GoodputCalculator(
-        self.job_name, self.logger_name, self.mock_cloud_logger
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.temp_dir,
     )
 
   def test_goodput_calculator(self):
@@ -432,8 +440,9 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-run'
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-log'
+    self.temp_dir = self.create_tempdir().full_path
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput.GoodputRecorder(
         self.job_name,
@@ -442,7 +451,10 @@ class GoodputDisruptionPartialRestartTest(googletest.TestCase):
         self.mock_cloud_logger,
     )
     self.goodput_calculator = goodput.GoodputCalculator(
-        self.job_name, self.logger_name, self.mock_cloud_logger
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.temp_dir,
     )
 
   def test_goodput_calculator(self):
@@ -574,8 +586,9 @@ class GoodputPathwaysTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-run'
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-log'
+    self.temp_dir = self.create_tempdir().full_path
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput.GoodputRecorder(
         self.job_name,
@@ -584,7 +597,11 @@ class GoodputPathwaysTest(googletest.TestCase):
         self.mock_cloud_logger,
     )
     self.goodput_calculator = goodput.GoodputCalculator(
-        self.job_name, self.logger_name, self.mock_cloud_logger, True
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        True,
+        cache_dir=self.temp_dir,
     )
 
   def test_goodput_with_anomalous_steps_single_disruption(self):
@@ -717,8 +734,9 @@ class BadputTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-run'
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-log'
+    self.temp_dir = self.create_tempdir().full_path
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput.GoodputRecorder(
         self.job_name,
@@ -727,7 +745,10 @@ class BadputTest(googletest.TestCase):
         self.mock_cloud_logger,
     )
     self.goodput_calculator = goodput.GoodputCalculator(
-        self.job_name, self.logger_name, self.mock_cloud_logger
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.temp_dir,
     )
 
   def test_tpu_init_recorder(self):
@@ -2152,8 +2173,9 @@ class GoodputStepDeviationConcurrencyTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-concurrent-run'
+    self.job_name = f'test-concurrent-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-concurrent-log'
+    self.temp_dir = self.create_tempdir().full_path
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput.GoodputRecorder(
         self.job_name,
@@ -2162,7 +2184,10 @@ class GoodputStepDeviationConcurrencyTest(googletest.TestCase):
         self.mock_cloud_logger,
     )
     self.goodput_calculator = goodput.GoodputCalculator(
-        self.job_name, self.logger_name, self.mock_cloud_logger
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.temp_dir,
     )
     self._mock_sample_program()
 
@@ -2217,8 +2242,9 @@ class GoodputExclusionIntegrationTest(googletest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.job_name = 'test-exclusion-run'
+    self.job_name = f'test-exclusion-run-{self.id().split(".")[-1]}'
     self.logger_name = 'test-exclusion-log'
+    self.temp_dir = self.create_tempdir().full_path
     self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
     self.goodput_recorder = goodput.GoodputRecorder(
         self.job_name,
@@ -2227,7 +2253,10 @@ class GoodputExclusionIntegrationTest(googletest.TestCase):
         self.mock_cloud_logger,
     )
     self.goodput_calculator = goodput.GoodputCalculator(
-        self.job_name, self.logger_name, self.mock_cloud_logger
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.temp_dir,
     )
 
   def _mock_sample_program_with_badput(self, start_time):

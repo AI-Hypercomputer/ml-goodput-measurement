@@ -1,5 +1,7 @@
 """Elastic Goodput monitoring API."""
 
+import datetime
+
 from cloud_goodput.ml_goodput_measurement.src import goodput_elastic
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 from cloud_goodput.ml_goodput_measurement.src import monitoring
@@ -34,6 +36,7 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
       ) = monitoring._PROCESS_TERMINATION_TIMEOUT_SECONDS,
       gcs_sync_interval_seconds: int = 3600,
       cache_dir: str = '/tmp',
+      max_logs_retention_period: datetime.timedelta | None = None,
   ):
     super().__init__(
         job_name=job_name,
@@ -51,6 +54,7 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
         final_flush_timeout_seconds=final_flush_timeout_seconds,
         gcs_sync_interval_seconds=gcs_sync_interval_seconds,
         cache_dir=cache_dir,
+        max_logs_retention_period=max_logs_retention_period,
     )
     if self._initialized:
       # Replace base calculator with elastic-aware one.
@@ -60,6 +64,7 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
           using_pathways=True,
           gcs_path=tensorboard_dir,
           cache_dir=self._worker_config['cache_dir'],
+          max_logs_retention_period=max_logs_retention_period,
       )
       self._worker_config['calculator_class'] = (
           goodput_elastic.ElasticGoodputCalculator

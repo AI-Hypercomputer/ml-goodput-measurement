@@ -60,7 +60,7 @@ _CUSTOM_BADPUT_EVENT_START_TIME = 'custom_badput_event_start_time'
 _CUSTOM_BADPUT_EVENT_END_TIME = 'custom_badput_event_end_time'
 
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
-_CLOUD_LOGGING_DEFAULT_RETENTION = datetime.timedelta(days=60)
+_CLOUD_LOGGING_DEFAULT_RETENTION = datetime.timedelta(days=7)
 
 logger = logging.getLogger(__name__)
 
@@ -2040,4 +2040,3 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
               (interval_end - interval_start).total_seconds()
           ),
       }
-

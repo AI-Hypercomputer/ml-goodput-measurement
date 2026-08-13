@@ -363,6 +363,7 @@ def _create_goodput_calculator(config: dict) -> GoodputCalculator:
       using_pathways=config['pathway_enabled'],
       gcs_path=config.get('tensorboard_dir'),
       cache_dir=config.get('cache_dir', '/tmp'),
+      max_logs_retention_period=config.get('max_logs_retention_period'),
   )
 
 
@@ -873,6 +874,7 @@ class GoodputMonitor:
       ) = _PROCESS_TERMINATION_TIMEOUT_SECONDS,
       gcs_sync_interval_seconds: int = 3600,
       cache_dir: str = '/tmp',
+      max_logs_retention_period: datetime.timedelta | None = None,
   ):
     """Initializes the GoodputMonitor.
 
@@ -912,6 +914,8 @@ class GoodputMonitor:
         True.
       gcs_sync_interval_seconds: The interval to sync the cache to GCS.
       cache_dir: Local directory to store the cache files.
+      max_logs_retention_period: The maximum retention period for Cloud Logging
+        logs. If not set, defaults to 7 days.
     """
     if not monitoring_enabled:
       logger.info(
@@ -951,6 +955,7 @@ class GoodputMonitor:
         using_pathways=pathway_enabled,
         gcs_path=tensorboard_dir,
         cache_dir=cache_dir,
+        max_logs_retention_period=max_logs_retention_period,
     )
     tensorboard_path = os.path.join(tensorboard_dir, _TENSORBOARD_GCS_SUBDIR)
     self._writer = writer.SummaryWriter(tensorboard_path)
@@ -993,6 +998,7 @@ class GoodputMonitor:
         'calculator_class': GoodputCalculator,
         'gcs_sync_interval_seconds': gcs_sync_interval_seconds,
         'cache_dir': cache_dir,
+        'max_logs_retention_period': max_logs_retention_period,
     }
 
     # Process management attributes

@@ -25,7 +25,7 @@ import os
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Tuple
-from ml_goodput_measurement import goodput
+from cloud_goodput.ml_goodput_measurement.src import goodput
 
 
 def get_project_id() -> Optional[str]:

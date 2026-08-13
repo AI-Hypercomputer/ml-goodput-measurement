@@ -124,6 +124,35 @@ class GoodputMonitorTests(absltest.TestCase):
     self.assertFalse(goodput_monitor._goodput_termination_event.is_set())
     self.assertIsNone(goodput_monitor._goodput_process)
 
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_goodput_monitor_env_overrides(
+      self, mock_logger_client, mock_summary_writer
+  ):
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+
+    with mock.patch.dict(
+        'os.environ',
+        {
+            'ML_GOODPUT_GCS_SYNC_INTERVAL_SECONDS': '120',
+            'ML_GOODPUT_CACHE_DIR': '/tmp/custom_cache_dir',
+        },
+    ):
+      goodput_monitor = GoodputMonitor(
+          self.job_name,
+          self.logger_name,
+          self.tensorboard_dir,
+          upload_interval=_TEST_UPLOAD_INTERVAL,
+          monitoring_enabled=True,
+      )
+      self.assertEqual(
+          goodput_monitor._worker_config['gcs_sync_interval_seconds'], 120
+      )
+      self.assertEqual(
+          goodput_monitor._worker_config['cache_dir'], '/tmp/custom_cache_dir'
+      )
+
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'
   )

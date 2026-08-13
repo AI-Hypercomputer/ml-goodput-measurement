@@ -130,6 +130,8 @@ class ElasticGoodputMonitorTests(absltest.TestCase):
         upload_interval=_TEST_UPLOAD_INTERVAL,
         monitoring_enabled=True,
         include_slice_efficiency=True,
+        gcs_sync_interval_seconds=120,
+        cache_dir='/tmp/custom_cache',
     )
 
     self.assertIsNotNone(monitor)
@@ -142,6 +144,17 @@ class ElasticGoodputMonitorTests(absltest.TestCase):
         goodput_elastic.ElasticGoodputCalculator,
     )
     self.assertTrue(monitor._worker_config['include_slice_efficiency'])
+    self.assertEqual(monitor._worker_config['gcs_sync_interval_seconds'], 120)
+    self.assertEqual(monitor._worker_config['cache_dir'], '/tmp/custom_cache')
+    # Check that calculator has GCS path and cache dir set
+    self.assertEqual(
+        monitor._goodput_calculator._goodput_cache._gcs_path,
+        self.tensorboard_dir,
+    )
+    self.assertEqual(
+        monitor._goodput_calculator._goodput_cache._cache_dir,
+        '/tmp/custom_cache',
+    )
 
   @patch('google.cloud.monitoring_v3.MetricServiceClient')
   @patch('tensorboardX.writer.SummaryWriter')

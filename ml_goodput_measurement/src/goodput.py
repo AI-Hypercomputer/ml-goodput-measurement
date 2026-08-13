@@ -614,6 +614,8 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       cloud_logger: Optional[_CloudLogger] = None,
       using_pathways: bool = False,
       max_logs_retention_period: Optional[datetime.timedelta] = None,
+      gcs_path: Optional[str] = None,
+      cache_dir: str = '/tmp',
   ):
     """GoodputCalculator constructor.
 
@@ -624,9 +626,17 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       using_pathways: Whether or not the job uses Pathways.
       max_logs_retention_period: Optional retention period for query of Cloud
         Logging entries.
+      gcs_path: Optional GCS path to sync the cache to.
+      cache_dir: Local directory to store the cache files.
     """
     self.job_name = job_name
     self.using_pathways = using_pathways
+    self._interval_cache = []
+    self._last_interval_entry_info: Optional[
+        tuple[datetime.datetime, str]
+    ] = None
+    self._last_interval_start_time: Optional[datetime.datetime] = None
+    self._last_interval_end_time: Optional[datetime.datetime] = None
     if cloud_logger is not None:
       self._cloud_logger = cloud_logger
     else:
@@ -635,8 +645,11 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           logger_name,
           max_logs_retention_period=max_logs_retention_period,
       )
-    self._current_entries = []
-    self._goodput_cache = GoodputCache()
+    self._goodput_cache = GoodputCache(
+        job_name=job_name,
+        gcs_path=gcs_path,
+        cache_dir=cache_dir,
+    )
     self._goodput_cache_lock = threading.Lock()
     self._interval_entries = []
     self._interval_start_time = None
@@ -645,6 +658,11 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     self._gcm_last_recorded_timestamp = None
     self._last_disruption_time = None  # pyrefly: ignore[bad-assignment]
     self._last_disrupted_step = None  # pyrefly: ignore[bad-assignment]
+
+  def sync_to_gcs(self):
+    """Syncs the underlying cache files to GCS."""
+    with self._goodput_cache_lock:
+      self._goodput_cache.sync_to_gcs()
 
   def _get_total_productive_and_unproductive_time(
       self, new_entries: list[dict[str, Any]]
@@ -1311,15 +1329,58 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
   def _get_interval_log_entries(
       self, start_time: datetime.datetime, end_time: datetime.datetime
   ):
-    """Helper function to get log entries from an interval window."""
+    """Helper function to get log entries from an interval window incrementally."""
     if start_time is None or end_time is None:
       raise ValueError(
           'Start and end times are required to get log entries from an interval'
           ' window.'
       )
-    self._interval_entries, _ = self._cloud_logger.read_cloud_logging_entries(  # type: ignore
-        start_time, end_time
+
+    # Detect if this is a sequential forward sliding window query
+    is_sequential = (
+        self._last_interval_end_time is not None
+        and self._last_interval_start_time is not None
+        and end_time > self._last_interval_end_time
+        and start_time >= self._last_interval_start_time
     )
+
+    if not is_sequential:
+      # Reset cache for non-sequential (arbitrary/jump) queries
+      self._interval_cache = []
+      self._last_interval_entry_info = None
+
+    if not self._interval_cache or self._last_interval_entry_info is None:
+      # Full query for cold start or non-sequential query
+      entries, last_info = self._cloud_logger.read_cloud_logging_entries(
+          start_time=start_time,
+          end_time=end_time,
+      )
+      self._interval_cache = entries
+      self._last_interval_entry_info = last_info
+    else:
+      # Incremental query: fetch only delta since last timestamp
+      last_ts, _ = self._last_interval_entry_info
+      if last_ts and end_time > last_ts:
+        new_entries, last_info = self._cloud_logger.read_cloud_logging_entries(
+            start_time=last_ts,
+            end_time=end_time,
+            last_entry_info=self._last_interval_entry_info,
+        )
+        self._interval_cache.extend(new_entries)
+        if last_info and last_info[0] is not None:
+          self._last_interval_entry_info = last_info
+
+    # Slide the window in-memory: discard older entries
+    self._interval_cache = [
+        entry
+        for entry in self._interval_cache
+        if (entry_ts := get_timestamp_from_log_entry(entry)) is not None
+        and entry_ts > start_time
+    ]
+
+    self._interval_entries = self._interval_cache
+    self._last_interval_start_time = start_time
+    self._last_interval_end_time = end_time
 
     if not self._interval_entries:
       raise ValueError(

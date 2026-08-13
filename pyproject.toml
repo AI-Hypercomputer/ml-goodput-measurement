@@ -35,6 +35,7 @@ dependencies = [
   "google-api-core>=2.24.1",
   "google-cloud-logging>=3.5.0",
   "google-cloud-monitoring>=2.20.0",
+  "google-cloud-storage>=2.0.0",
   "numpy",
   "requests",
   "scipy",

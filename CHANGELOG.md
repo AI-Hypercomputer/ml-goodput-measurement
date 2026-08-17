@@ -21,6 +21,13 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.2.3] - 2026-08-14
+
+### Added
+
+* Performance, quota, and timeout improvements for Cloud Logging queries.
+* Configurable log retention query window.
+
 ## [0.2.2] - 2026-08-06
 
 ### Added
@@ -157,6 +164,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.2.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.16...v0.2.0
 [0.0.16]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.15...v0.0.16

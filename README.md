@@ -15,6 +15,17 @@
  -->
 # ML Goodput Measurement
 
+<!-- NEWS START -->
+## 🔥 Latest news 🔥
+
+- [August 14, 2026] **Release v0.2.3**: Introduced a GCS Cache Sync to speed up cold start reads.
+- [August 6, 2026] **Release v0.2.2**: Enabled Google Cloud Monitoring (GCM)
+  upload for slice efficiency metrics and optimized final flushes.
+- [June 12, 2026] **Release v0.2.0**: Added support for Elastic Goodput
+  Monitoring (autoscaling) and asynchronous log writing to eliminate gRPC RTT
+  on the critical path.
+<!-- NEWS END -->
+
 ## Overview
 
  ML Goodput Measurement is a library intended to be used with Cloud accelerators
@@ -524,6 +535,9 @@ Create a `GoodputMonitor` object with the following parameters:
         termination. Defaults to `False`. Setting this to `True` is useful to
         avoid blocking job termination, as the final flush can take longer
         due to Cloud Logging reads.
+  8. `max_logs_retention_period`: The maximum time period (in seconds) to query
+        logs for. Defaults to 7 days (`7 * 24 * 60 * 60`). Reducing this window
+        prevents query timeouts on large or long-running training runs.
 
 > **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
    In JAX, for example, the check could be `if jax.process_index() == 0`
@@ -541,6 +555,7 @@ goodput_monitor = monitoring.GoodputMonitor(
       upload_interval=config.goodput_upload_interval_seconds,
       monitoring_enabled=True,
       include_badput_breakdown=True,
+      max_logs_retention_period=7 * 24 * 60 * 60, # Optional: override default 7 days retention
     )
 ```
 

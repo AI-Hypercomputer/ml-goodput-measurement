@@ -1427,6 +1427,195 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_badput_calculator_jump_forward_rollback(self):
+    """Validate computation of badput when there is a jump-forward rollback."""
+
+    step_time = _TEST_STEP_TIME
+    startup_overhead = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+    first_step_extra = _TEST_FIRST_STEP_EXTRA_TIME
+    disruption_time = datetime.timedelta(seconds=5)
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+
+    # Helper to mock startup
+    def mock_startup(t):
+      self.goodput_recorder.record_tpu_init_start_time(t)
+      self.goodput_recorder.record_tpu_init_end_time(t + _TEST_TPU_INIT_TIME)
+      self.goodput_recorder.record_training_preparation_start_time(
+          t + _TEST_TPU_INIT_TIME
+      )
+      self.goodput_recorder.record_training_preparation_end_time(
+          t + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+      )
+      self.goodput_recorder.record_data_loading_start_time(
+          t + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+      )
+      self.goodput_recorder.record_data_loading_end_time(
+          t
+          + _TEST_TPU_INIT_TIME
+          + _TEST_TRAINING_PREPARATION_TIME
+          + _TEST_DATA_LOADING_TIME
+      )
+
+    # --- RUN 1 ---
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    mock_startup(job_start_time)
+
+    t = job_start_time + startup_overhead
+    for step in range(10):  # 0 to 9
+      self.goodput_recorder.record_step_start_time(step, t)
+      t += step_time
+      if step == 0:
+        t += first_step_extra
+
+    # --- DISRUPTION 1 ---
+    t += disruption_time
+    run_2_start = t
+
+    # --- RUN 2 (Rollback to 5) ---
+    self.goodput_recorder.record_job_start_time(run_2_start)
+    mock_startup(run_2_start)
+
+    t = run_2_start + startup_overhead
+    for step in range(5, 8):  # 5, 6, 7
+      self.goodput_recorder.record_step_start_time(step, t)
+      t += step_time
+      if step == 5:
+        t += first_step_extra
+
+    # --- DISRUPTION 2 ---
+    t += disruption_time
+    run_3_start = t
+
+    # --- RUN 3 (Jump-forward to 9) ---
+    self.goodput_recorder.record_job_start_time(run_3_start)
+    mock_startup(run_3_start)
+
+    t = run_3_start + startup_overhead
+    for step in range(9, 11):  # 9, 10
+      self.goodput_recorder.record_step_start_time(step, t)
+      t += step_time
+      if step == 9:
+        t += first_step_extra
+
+    job_end_time = t
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Badput.
+    _, computed_badput_breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+
+    # Expected values
+    # Total job time = 85.0s
+    # Wasted progress time = 6.0s
+    total_time_secs = 85.0
+    expected_badput_due_to_wasted_progress = (6.0 / total_time_secs) * 100
+
+    self.assertNotEmpty(computed_badput_breakdown)
+    self.assertIn(
+        BadputType.WASTED_PROGRESS_FROM_DISRUPTION,
+        computed_badput_breakdown,
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
+        expected_badput_due_to_wasted_progress,
+        delta=0.1,
+    )
+
+  def test_badput_calculator_sequential_restart_deferred_credit(self):
+    """Validate deferred credit and downtime computation on sequential restarts."""
+
+    step_time = _TEST_STEP_TIME
+    startup_overhead = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_TRAINING_PREPARATION_TIME
+        + _TEST_DATA_LOADING_TIME
+    )
+    first_step_extra = _TEST_FIRST_STEP_EXTRA_TIME
+    disruption_time = datetime.timedelta(seconds=10)
+
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+
+    # Helper to mock startup
+    def mock_startup(t):
+      self.goodput_recorder.record_tpu_init_start_time(t)
+      self.goodput_recorder.record_tpu_init_end_time(t + _TEST_TPU_INIT_TIME)
+      self.goodput_recorder.record_training_preparation_start_time(
+          t + _TEST_TPU_INIT_TIME
+      )
+      self.goodput_recorder.record_training_preparation_end_time(
+          t + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+      )
+      self.goodput_recorder.record_data_loading_start_time(
+          t + _TEST_TPU_INIT_TIME + _TEST_TRAINING_PREPARATION_TIME
+      )
+      self.goodput_recorder.record_data_loading_end_time(
+          t
+          + _TEST_TPU_INIT_TIME
+          + _TEST_TRAINING_PREPARATION_TIME
+          + _TEST_DATA_LOADING_TIME
+      )
+
+    # --- RUN 1 (Steps 0 to 4) ---
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    mock_startup(job_start_time)
+
+    t = job_start_time + startup_overhead
+    for step in range(5):  # 0, 1, 2, 3, 4
+      self.goodput_recorder.record_step_start_time(step, t)
+      t += step_time
+      if step == 0:
+        t += first_step_extra
+
+    # --- DISRUPTION (Downtime: 10s) ---
+    t += disruption_time
+    run_2_start = t
+
+    # --- RUN 2 (Sequential resume at Step 5) ---
+    self.goodput_recorder.record_job_start_time(run_2_start)
+    mock_startup(run_2_start)
+
+    t = run_2_start + startup_overhead
+    for step in range(5, 8):  # 5, 6, 7
+      self.goodput_recorder.record_step_start_time(step, t)
+      t += step_time
+      if step == 5:
+        t += first_step_extra
+
+    job_end_time = t
+    self.goodput_recorder.record_job_end_time(job_end_time)
+
+    # Compute Goodput and Badput breakdown.
+    computed_goodput, computed_badput_breakdown, _ = (
+        self.goodput_calculator.get_job_goodput(include_badput_breakdown=True)
+    )
+
+    # Expected values
+    # Total job time = 54.0s
+    # Total productive time = 8 steps * 3.0s = 24.0s
+    # Total downtime = 10.0s
+    total_time_secs = 54.0
+    expected_goodput = (24.0 / total_time_secs) * 100
+    expected_infra_badput = (10.0 / total_time_secs) * 100
+
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+    self.assertIn(
+        BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION,
+        computed_badput_breakdown,
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[
+            BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
+        ],
+        expected_infra_badput,
+        delta=0.1,
+    )
+
   def test_badput_calculator_unknown_badput(self):
     """Test function to validate unknown badput bucket."""
 

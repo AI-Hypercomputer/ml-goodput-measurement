@@ -658,6 +658,9 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     self._gcm_last_recorded_timestamp = None
     self._last_disruption_time = None  # pyrefly: ignore[bad-assignment]
     self._last_disrupted_step = None  # pyrefly: ignore[bad-assignment]
+    self._historical_step_times = {}
+    self._pending_credit_step = None
+    self._pending_credit_duration = 0.0
 
   def sync_to_gcs(self):
     """Syncs the underlying cache files to GCS."""
@@ -857,20 +860,24 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         curr_step_num, curr_time = step_items[i]
 
         raw_delta = curr_time - prev_time
-        if curr_step_num <= curr_step:
-          if curr_step_num - 1 != prev_step:
-            continue
 
-          custom_sync_in_interval = 0.0
-          for sync_start, sync_end, sync_type in custom_sync_intervals:
-            if prev_time <= sync_start and sync_end <= curr_time:
-              sync_duration = sync_end - sync_start
-              custom_sync_in_interval += sync_duration
+        custom_sync_in_interval = 0.0
+        for sync_start, sync_end, sync_type in custom_sync_intervals:
+          if prev_time <= sync_start and sync_end <= curr_time:
+            sync_duration = sync_end - sync_start
+            custom_sync_in_interval += sync_duration
+            if curr_step_num <= curr_step:
               custom_sync_breakdown[sync_type] = (
                   custom_sync_breakdown.get(sync_type, 0.0) + sync_duration
               )
 
-          adjusted_delta = max(0.0, raw_delta - custom_sync_in_interval)
+        adjusted_delta = max(0.0, raw_delta - custom_sync_in_interval)
+        self._historical_step_times[prev_step] = adjusted_delta
+
+        if curr_step_num <= curr_step:
+          if curr_step_num - 1 != prev_step:
+            continue
+
           total_productive_time += adjusted_delta
 
           if prev_step == min_step:
@@ -1006,6 +1013,17 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           custom_sync_breakdown,
       )
 
+      # Adjust the first step's historical time to exclude startup overhead.
+      startup_extra = total_segment_unproductive_time.get(
+          BadputType.PROGRAM_STARTUP, 0.0
+      )
+      if (
+          isinstance(startup_extra, (int, float))
+          and startup_extra > 0.0
+          and min_step in self._historical_step_times
+      ):
+        self._historical_step_times[min_step] -= startup_extra
+
       return (
           final_adjusted_productive_time,
           total_segment_unproductive_time,
@@ -1046,10 +1064,127 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       if _JOB_START_TIME in payload:
         # Keep track of the latest start to compute badput due to disruption.
         job_start_time = payload[_JOB_START_TIME]
+
       if _STEP_START_TIME in payload:
         curr_step = int(payload[_STEP_COUNT])
         if curr_step not in step_start_data:
-          step_start_data[curr_step] = payload[_STEP_START_TIME]
+          is_jump_forward = False
+          is_sequential_restart = False
+          if step_start_data:
+            prev_step = list(step_start_data.keys())[-1]
+            if curr_step > prev_step + 1:
+              is_jump_forward = True
+              self._number_of_interruptions += 1
+              self._last_disrupted_step = prev_step
+              self._last_disruption_time = step_start_data[prev_step]
+
+              # Compute segment productive and unproductive time.
+              (
+                  segment_productive_time,
+                  segment_unproductive_time,
+                  _,
+              ) = _get_segment_productive_and_unproductive_time(
+                  step_start_data, curr_step, entries_to_process
+              )
+
+              # Calculate salvaged progress from historical step times.
+              salvaged_run_1 = 0.0
+              segment_2_min_step = min(step_start_data.keys())
+              for s in range(segment_2_min_step, curr_step):
+                salvaged_run_1 += self._historical_step_times.get(s, 0.0)
+
+              # Adjust wasted progress: we lost the progress in current segment
+              # (segment_productive_time) but recovered salvaged_run_1.
+              net_wasted = segment_productive_time - salvaged_run_1
+              segment_unproductive_time[
+                  BadputType.WASTED_PROGRESS_FROM_DISRUPTION
+              ] = net_wasted
+
+              if (
+                  job_start_time is not None
+                  and self._last_disruption_time is not None
+                  and job_start_time > self._last_disruption_time
+              ):
+                infrastructure_disruption_badput = (
+                    job_start_time - self._last_disruption_time
+                )
+                existing_infra = segment_unproductive_time.get(
+                    BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION, 0.0
+                )
+                infra_val = (
+                    existing_infra
+                    if isinstance(existing_infra, (int, float))
+                    else 0.0
+                )
+                segment_unproductive_time[
+                    BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
+                ] = infra_val + infrastructure_disruption_badput
+
+              # Accumulate metrics
+              productive_training_time += salvaged_run_1
+              self._accumulate_unproductive_time(
+                  segment_unproductive_time, total_unproductive_time
+              )
+
+              # Reset step_start_data for the new segment
+              step_start_data = {curr_step: payload[_STEP_START_TIME]}
+
+            elif (
+                job_start_time is not None
+                and job_start_time > step_start_data[prev_step]
+            ):
+              # Sequential restart with job_start_time between prev_step and curr_step
+              is_sequential_restart = True
+              self._number_of_interruptions += 1
+              self._last_disrupted_step = prev_step
+              self._last_disruption_time = step_start_data[prev_step]
+
+              (
+                  segment_productive_time,
+                  segment_unproductive_time,
+                  _,
+              ) = _get_segment_productive_and_unproductive_time(
+                  step_start_data, prev_step, entries_to_process
+              )
+
+              num_completed_steps = len(step_start_data) - 1
+              if num_completed_steps > 0:
+                avg_step_time = segment_productive_time / num_completed_steps
+              elif prev_step in self._historical_step_times:
+                avg_step_time = self._historical_step_times[prev_step]
+              else:
+                avg_step_time = 0.0
+
+              # Credit prev_step productive time
+              productive_training_time += (
+                  segment_productive_time + avg_step_time
+              )
+
+              # Add downtime minus the credited prev_step duration
+              infrastructure_disruption_badput = max(
+                  0.0,
+                  (job_start_time - self._last_disruption_time) - avg_step_time,
+              )
+              existing_infra = segment_unproductive_time.get(
+                  BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION, 0.0
+              )
+              infra_val = (
+                  existing_infra
+                  if isinstance(existing_infra, (int, float))
+                  else 0.0
+              )
+              segment_unproductive_time[
+                  BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
+              ] = infra_val + infrastructure_disruption_badput
+
+              self._accumulate_unproductive_time(
+                  segment_unproductive_time, total_unproductive_time
+              )
+
+              step_start_data = {curr_step: payload[_STEP_START_TIME]}
+
+          if not is_jump_forward and not is_sequential_restart:
+            step_start_data[curr_step] = payload[_STEP_START_TIME]
         else:
           # In this case, the job restarted from Step (curr_step). It means that
           # all progress till Step (curr_step - 1) has been preserved. So we
@@ -1075,9 +1210,16 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           # When the job restarts, data loading is synchronous.
           sync_data_loading = True
           if current_sync_data_loading is not None:
+            existing_sync = segment_unproductive_time.get(
+                BadputType.DATA_LOADING_SYNC, 0.0
+            )
+            sync_val = (
+                existing_sync
+                if isinstance(existing_sync, (int, float))
+                else 0.0
+            )
             segment_unproductive_time[BadputType.DATA_LOADING_SYNC] = (
-                segment_unproductive_time.get(BadputType.DATA_LOADING_SYNC, 0)
-                + current_sync_data_loading
+                sync_val + current_sync_data_loading
             )
             current_sync_data_loading = None
 
@@ -1107,17 +1249,17 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
             infrastructure_disruption_badput = (
                 job_start_time - self._last_disruption_time
             )
-            if (
+            existing_infra = segment_unproductive_time.get(
+                BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION, 0.0
+            )
+            infra_val = (
+                existing_infra
+                if isinstance(existing_infra, (int, float))
+                else 0.0
+            )
+            segment_unproductive_time[
                 BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
-                in segment_unproductive_time
-            ):
-              segment_unproductive_time[
-                  BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
-              ] += infrastructure_disruption_badput
-            else:
-              segment_unproductive_time[
-                  BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
-              ] = infrastructure_disruption_badput
+            ] = infra_val + infrastructure_disruption_badput
 
           # The second bucket is individually computed either from recorded
           # logs (TPU initialization, training preparation, data loading) or

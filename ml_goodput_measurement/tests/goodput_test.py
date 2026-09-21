@@ -1324,6 +1324,80 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_badput_calculator_program_startup_delayed_compilation(self):
+    """Validate startup badput when compilation occurs on step N+1 after a fast warmup step N."""
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    warmup_step_time = datetime.timedelta(seconds=1)
+    step_start_time = job_start_time
+    total_steps = 6
+
+    for step in range(total_steps):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      if step == 0:
+        # Lightweight warmup step (shorter than steady-state step time).
+        step_start_time += warmup_step_time
+      elif step == 1:
+        # JAX/XLA compilation occurs on step 1.
+        step_start_time += _TEST_STEP_TIME + _TEST_FIRST_STEP_EXTRA_TIME
+      else:
+        step_start_time += _TEST_STEP_TIME
+
+    job_end_time = step_start_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+    total_time = job_end_time - job_start_time
+
+    computed_goodput, computed_badput_breakdown, _ = (
+        self.goodput_calculator.get_job_goodput(include_badput_breakdown=True)
+    )
+
+    expected_startup_badput = (
+        _TEST_FIRST_STEP_EXTRA_TIME.total_seconds()
+        / total_time.total_seconds()
+        * 100
+    )
+    expected_productive_secs = (
+        warmup_step_time + _TEST_STEP_TIME * (total_steps - 1)
+    ).total_seconds()
+    expected_goodput = (
+        expected_productive_secs / total_time.total_seconds() * 100
+    )
+
+    self.assertIn(BadputType.PROGRAM_STARTUP, computed_badput_breakdown)
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.PROGRAM_STARTUP],
+        expected_startup_badput,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+
+    # Verify _historical_step_times clamps step 1 without making step 0 negative.
+    self.assertAlmostEqual(
+        self.goodput_calculator._historical_step_times[0],
+        warmup_step_time.total_seconds(),
+        delta=0.01,
+    )
+    self.assertAlmostEqual(
+        self.goodput_calculator._historical_step_times[1],
+        _TEST_STEP_TIME.total_seconds(),
+        delta=0.01,
+    )
+
+    # Also verify interval goodput breakdown over the window.
+    interval_goodput, interval_badput, _, _, _ = (
+        self.goodput_calculator.get_job_goodput_interval(
+            job_start_time - datetime.timedelta(seconds=1),
+            job_end_time + datetime.timedelta(seconds=1),
+        )
+    )
+    self.assertAlmostEqual(
+        interval_badput[BadputType.PROGRAM_STARTUP],
+        expected_startup_badput,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(interval_goodput, expected_goodput, delta=0.1)
+
   def test_badput_calculator_wasted_progress_and_disruptions(self):
     """Validate computation of badput due to wasted progress and disruptions."""
 

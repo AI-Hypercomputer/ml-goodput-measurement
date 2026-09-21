@@ -264,6 +264,13 @@ def compute_step_deviation_from_baseline(
     raise ValueError('Unsupported MonitoringWindowType mode: {mode}')
 
 
+def compute_baseline_step_time(step_times: list[float]) -> float:
+  """Computes baseline steady-state step time using the lower median."""
+  if not step_times:
+    return 0.0
+  return sorted(step_times)[(len(step_times) - 1) // 2]
+
+
 def compute_ideal_step_time(step_times: list[float]) -> Optional[float]:
   """Helper function to compute the ideal step time."""
   # Filter out step times that may be less than 1 second.

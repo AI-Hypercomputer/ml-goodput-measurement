@@ -22,6 +22,7 @@ get_extra_time_from_anomalous_steps = (
     goodput_utils.get_extra_time_from_anomalous_steps
 )
 compute_ideal_step_time = goodput_utils.compute_ideal_step_time
+compute_baseline_step_time = goodput_utils.compute_baseline_step_time
 
 BadputType = goodput_utils.BadputType
 CheckpointLoggerOptions = checkpoint_badput_calculator.CheckpointLoggerOptions
@@ -58,6 +59,7 @@ _DATA_LOADING_END_TIME = 'data_loading_end_time'
 _CUSTOM_BADPUT_EVENT_TYPE = 'custom_badput_event_type'
 _CUSTOM_BADPUT_EVENT_START_TIME = 'custom_badput_event_start_time'
 _CUSTOM_BADPUT_EVENT_END_TIME = 'custom_badput_event_end_time'
+_STARTUP_COMPILATION_WINDOW = 5
 
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
 _CLOUD_LOGGING_DEFAULT_RETENTION = datetime.timedelta(days=7)
@@ -806,7 +808,6 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         custom_sync_intervals: list[tuple[float, float, str]],
     ) -> tuple[
         float,
-        float,
         list[float],
         float,
         dict[str, float],
@@ -833,10 +834,8 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           A tuple containing:
             - total_productive_time (float): Adjusted time excluding custom
                 sync durations.
-            - first_step_time (float): Adjusted duration of the first step in
-                the segment.
-            - step_times (list[float]): List of adjusted times for steps in the
-                segment excluding the first step.
+            - step_times (list[float]): List of adjusted times for all productive
+                steps in the segment.
             - wasted_progress (float): Total unproductive time due to possible
                 disruptions.
             - custom_sync_breakdown (dict[str, float]):
@@ -847,7 +846,6 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
                 segment that is considered productive.
       """
       total_productive_time = 0.0
-      first_step_time = 0.0
       step_times = []
       wasted_progress = 0.0
       custom_sync_breakdown: dict[str, float] = {}
@@ -879,12 +877,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
             continue
 
           total_productive_time += adjusted_delta
-
-          if prev_step == min_step:
-            first_step_time = adjusted_delta
-          else:
-            step_times.append(adjusted_delta)
-
+          step_times.append(adjusted_delta)
           steps_in_segment += 1
           max_productive_step_count = prev_step
 
@@ -894,7 +887,6 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
 
       return (
           total_productive_time,
-          first_step_time,
           step_times,
           wasted_progress,
           custom_sync_breakdown,
@@ -903,9 +895,8 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       )
 
     def _compute_segment_final_metrics(
-        adjusted_productive_time: float,
-        first_step_time: float,
-        step_times: list[float],
+        total_productive_time: float,
+        startup_extra_time: float,
         wasted_progress: float,
         custom_sync_breakdown: dict[str, float],
     ) -> tuple[
@@ -914,15 +905,9 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     ]:
       """Computes final metrics for a segment, separating productive and unproductive time.
 
-      This function takes adjusted productive time and calculates additional
-      badput sources such as program startup and wasted progress due to
-      disruptions. It returns the final productive time and a breakdown of all
-      unproductive time sources.
-
       Args:
-          adjusted_productive_time: Total productive time for the segment
-          first_step_time: Productive time for the first step in the segment.
-          step_times: Productive times for non-first steps in the segment.
+          total_productive_time: Total productive time for the segment.
+          startup_extra_time: Total excess time attributed to program startup.
           wasted_progress: Total time lost due to step discontinuities.
           custom_sync_breakdown: A dictionary mapping each custom sync type to
             the total badput time it accounted for during the segment.
@@ -932,29 +917,12 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
               - final_productive_time (float)
               - total_segment_unproductive_time (dict)
       """
-      steps_in_segment = len(step_times) + 1  # Including first step
-
-      if steps_in_segment == 1:
-        return first_step_time, {
-            BadputType.WASTED_PROGRESS_FROM_DISRUPTION: wasted_progress,
-            BadputType.CUSTOM_BADPUT_EVENTS: custom_sync_breakdown,
-            BadputType.PROGRAM_STARTUP: 0.0,
-        }
-
-      non_first_steps = steps_in_segment - 1
-      non_first_total_time = adjusted_productive_time - first_step_time
-      average_step_time = (
-          non_first_total_time / non_first_steps if non_first_steps > 0 else 0.0
-      )
-      first_step_extra_time = max(0.0, first_step_time - average_step_time)
-      final_productive_time = adjusted_productive_time - first_step_extra_time
-
+      final_productive_time = total_productive_time - startup_extra_time
       total_segment_unproductive_time = {
-          BadputType.PROGRAM_STARTUP: first_step_extra_time,
+          BadputType.PROGRAM_STARTUP: startup_extra_time,
           BadputType.WASTED_PROGRESS_FROM_DISRUPTION: wasted_progress,
           BadputType.CUSTOM_BADPUT_EVENTS: custom_sync_breakdown,
       }
-
       return final_productive_time, total_segment_unproductive_time
 
     def _get_segment_productive_and_unproductive_time(
@@ -977,10 +945,9 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           entries_to_process
       )
 
-      # Compute adjusted segmentproductive and unproductive times
+      # Compute adjusted segment productive and unproductive times
       (
           total_productive_time,
-          first_step_time,
           step_times,
           wasted_progress_from_disruption,
           custom_sync_breakdown,
@@ -1001,28 +968,36 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
             0,
         )
 
-      # Compute adjusted averages and unproductive breakdown
+      # Attribute the maximum excess step time in the startup window to program startup.
+      startup_window = min(_STARTUP_COMPILATION_WINDOW, steps_in_segment)
+      baseline_step_time = compute_baseline_step_time(step_times)
+      compilation_step_offset = max(
+          range(startup_window), key=lambda i: step_times[i]
+      )
+      startup_extra_time = (
+          max(0.0, step_times[compilation_step_offset] - baseline_step_time)
+          if steps_in_segment > 1
+          else 0.0
+      )
+
+      # Adjust the compilation step's historical time to exclude startup overhead.
+      compilation_step = min_step + compilation_step_offset
+      if (
+          startup_extra_time > 0.0
+          and compilation_step in self._historical_step_times
+      ):
+        self._historical_step_times[compilation_step] -= startup_extra_time
+
+      # Compute final segment metrics.
       (
           final_adjusted_productive_time,
           total_segment_unproductive_time,
       ) = _compute_segment_final_metrics(
           total_productive_time,
-          first_step_time,
-          step_times,
+          startup_extra_time,
           wasted_progress_from_disruption,
           custom_sync_breakdown,
       )
-
-      # Adjust the first step's historical time to exclude startup overhead.
-      startup_extra = total_segment_unproductive_time.get(
-          BadputType.PROGRAM_STARTUP, 0.0
-      )
-      if (
-          isinstance(startup_extra, (int, float))
-          and startup_extra > 0.0
-          and min_step in self._historical_step_times
-      ):
-        self._historical_step_times[min_step] -= startup_extra
 
       return (
           final_adjusted_productive_time,

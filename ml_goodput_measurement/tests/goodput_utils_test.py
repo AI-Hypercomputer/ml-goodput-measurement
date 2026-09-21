@@ -78,6 +78,24 @@ class GoodputUtilsTest(absltest.TestCase):
     result = goodput_utils.get_gcp_metadata('instance', 'missing-key')
     self.assertIsNone(result)
 
+  def test_compute_baseline_step_time(self):
+    """Tests lower median baseline calculation for various step sequences."""
+    self.assertEqual(goodput_utils.compute_baseline_step_time([]), 0.0)
+    self.assertEqual(goodput_utils.compute_baseline_step_time([5.0]), 5.0)
+    # 2 steps: lower median selects min
+    self.assertEqual(
+        goodput_utils.compute_baseline_step_time([10.0, 2.0]), 2.0
+    )
+    # 3 steps with warmup and delayed compilation
+    self.assertEqual(
+        goodput_utils.compute_baseline_step_time([1.0, 60.0, 2.0]), 2.0
+    )
+    # 6 steps with delayed compilation
+    self.assertEqual(
+        goodput_utils.compute_baseline_step_time([1.0, 60.0, 2.0, 2.0, 2.0, 2.0]),
+        2.0,
+    )
+
 
 if __name__ == '__main__':
   absltest.main()

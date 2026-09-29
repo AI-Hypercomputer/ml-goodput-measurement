@@ -208,8 +208,8 @@ class _CloudLogger:
       effective_start_timestamp = self.job_start_time - datetime.timedelta(
           seconds=10
       )
-      if effective_start_timestamp.tzinfo is None:
-        effective_start_timestamp = effective_start_timestamp.replace(
+      if effective_start_timestamp.tzinfo is None:  # pyrefly: ignore[missing-attribute]
+        effective_start_timestamp = effective_start_timestamp.replace(  # pyrefly: ignore[missing-attribute]
             tzinfo=datetime.timezone.utc
         )
     else:

@@ -234,6 +234,84 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
         weighted_available / total_duration,
     )
 
+  def _get_restart_event(
+      self, payload: dict[str, Any]
+  ) -> Optional[tuple[float, goodput_utils.RestartType]]:
+    """Identifies job or in-process elastic restart events from a log entry.
+
+    In Pathways elastic training, slice-down and scale-up recoveries occur
+    in-process without logging a new `job_start_time`. Detecting
+    `elastic_wait_start_time` (or `elastic_reinit_start_time` as a fallback)
+    ensures pre-restart step segments are closed and post-restart recovery
+    is properly classified.
+
+    Args:
+      payload: Dictionary payload of a Cloud Logging entry.
+
+    Returns:
+      A tuple of `(restart_timestamp, RestartType)` if the entry marks a
+      restart, or None otherwise.
+    """
+    restart_event = super()._get_restart_event(payload)
+    if restart_event is not None:
+      return restart_event
+
+    # Elastic wait marks the beginning of an in-process scale-up or slice-down.
+    if _ELASTIC_WAIT_START_TIME in payload:
+      wait_event_type = str(payload.get(_ELASTIC_WAIT_EVENT_TYPE, '')).lower()
+      restart_type = (
+          goodput_utils.RestartType.ELASTIC_SCALE_UP
+          if 'scale_up' in wait_event_type
+          else goodput_utils.RestartType.ELASTIC_SLICE_DOWN
+      )
+      return float(payload[_ELASTIC_WAIT_START_TIME]), restart_type
+
+    # Fallback if elastic_reinit_start_time is logged without a preceding wait.
+    if _ELASTIC_REINIT_START_TIME in payload:
+      return (
+          float(payload[_ELASTIC_REINIT_START_TIME]),
+          goodput_utils.RestartType.ELASTIC_SLICE_DOWN,
+      )
+    return None
+
+  @staticmethod
+  def _extract_restore_intervals(
+      entries: list[dict[str, Any]],
+  ) -> list[tuple[float, float]]:
+    """Extracts `[start_ts, end_ts]` intervals for checkpoint restore events.
+
+    Used to discount `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME` when a checkpoint
+    restore occurs inside an `ELASTIC_REINITIALIZATION` window so the restore
+    duration is not double-counted. Groups by `(step, is_local)` and averages
+    across multiple worker occurrences to match `CheckpointBadputCalculator`.
+
+    Args:
+      entries: List of Cloud Logging entry dictionaries.
+
+    Returns:
+      A list of `(restore_start_ts, restore_end_ts)` tuples.
+    """
+    grouped_restores: dict[tuple[Any, bool], list[tuple[float, float]]] = {}
+    for entry in entries:
+      if entry.get('event_type') in ('restore', 'emergency_restore'):
+        restore_start = entry.get('checkpoint_manager_start_time')
+        restore_duration = entry.get('checkpoint_manager_duration_secs')
+        if restore_start is not None and restore_duration is not None:
+          restore_start_ts = float(restore_start)
+          restore_duration_secs = float(restore_duration)
+          if restore_duration_secs > 0.0:
+            is_local = not str(entry.get('directory', '')).startswith('gs://')
+            key = (entry.get('step'), is_local)
+            grouped_restores.setdefault(key, []).append(
+                (restore_start_ts, restore_duration_secs)
+            )
+    restore_intervals = []
+    for items in grouped_restores.values():
+      avg_start = sum(s for s, _ in items) / len(items)
+      avg_duration = sum(d for _, d in items) / len(items)
+      restore_intervals.append((avg_start, avg_start + avg_duration))
+    return restore_intervals
+
   def _get_current_productive_and_unproductive_time(
       self, interval_query: Optional[bool] = False
   ) -> tuple[float, goodput.UnproductiveTimeDict, int, int]:
@@ -268,13 +346,18 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
           + (end - start)
       )
 
-    # On elastic retries TPU_INIT and TRAINING_PREP are already counted inside
-    # ELASTIC_REINITIALIZATION, so discount the overlap.
+    # On elastic retries TPU_INIT, TRAINING_PREP, and CHECKPOINT_RESTORE are
+    # already counted inside ELASTIC_REINITIALIZATION, so discount the overlap.
     if reinit_intervals:
       tpu_intervals, prep_intervals = self._extract_init_intervals(entries)
+      restore_intervals = self._extract_restore_intervals(entries)
       for bt, intervals in (
           (goodput_utils.BadputType.TPU_INITIALIZATION, tpu_intervals),
           (goodput_utils.BadputType.TRAINING_PREP, prep_intervals),
+          (
+              goodput_utils.BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME,
+              restore_intervals,
+          ),
       ):
         overlap = self._overlap_with_reinit(intervals, reinit_intervals)
         if overlap > 0 and bt in unproductive_time:

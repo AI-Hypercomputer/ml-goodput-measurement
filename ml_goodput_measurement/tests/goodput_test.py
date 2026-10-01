@@ -2767,5 +2767,239 @@ class GoodputExclusionIntegrationTest(googletest.TestCase):
         breakdown[BadputType.TRAINING_PREP], 25, delta=0.1
     )
 
+  def test_checkpoint_badput_skipped_for_uncompleted_step(self):
+    """Validates checkpoint save badput does not cause negative productive time if step did not complete."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 15, 50, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    step_start = job_start_time + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_step_start_time(0, step_start)
+
+    save_stats = MockSaveStepStatistics(
+        step=0,
+        event_type='save',
+        directory='gs://bucket/path',
+        checkpoint_manager_blocking_start_time=step_start.timestamp() + 5.0,
+        checkpoint_manager_blocking_duration_secs=3.0,
+        synchronous=True,
+    )
+    self.mock_cloud_logger.write_cloud_logging_entry(asdict(save_stats))
+
+    goodput_pct, breakdown, max_step = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertEqual(goodput_pct, 0.0)
+    self.assertEqual(max_step, 0)
+    self.assertGreater(
+        breakdown.get(BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME, 0.0), 0.0
+    )
+
+  def test_checkpoint_save_on_compilation_step_not_double_subtracted(self):
+    """Validates checkpoint save on compilation step is deducted before startup_extra_time."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 16, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Step 0: 3s execution + 10s compilation + 4s save = 17s total delta
+    s0 = job_start_time
+    self.goodput_recorder.record_step_start_time(0, s0)
+    save_stats = MockSaveStepStatistics(
+        step=0,
+        event_type='save',
+        directory='gs://bucket/path',
+        checkpoint_manager_blocking_start_time=s0.timestamp() + 13.0,
+        checkpoint_manager_blocking_duration_secs=4.0,
+        synchronous=True,
+    )
+    self.mock_cloud_logger.write_cloud_logging_entry(asdict(save_stats))
+
+    # Step 1: 3s execution
+    s1 = s0 + datetime.timedelta(seconds=17)
+    self.goodput_recorder.record_step_start_time(1, s1)
+
+    # Step 2: 3s execution
+    s2 = s1 + datetime.timedelta(seconds=3)
+    self.goodput_recorder.record_step_start_time(2, s2)
+    job_end = s2 + datetime.timedelta(seconds=3)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    # Total time = 23s. Productive = 3 steps * 3s = 9s.
+    # Startup = 10s. Checkpoint save = 4s.
+    goodput_pct, breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertAlmostEqual(goodput_pct, (9.0 / 23.0) * 100, delta=0.1)
+    self.assertAlmostEqual(
+        breakdown[BadputType.PROGRAM_STARTUP], (10.0 / 23.0) * 100, delta=0.1
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME],
+        (4.0 / 23.0) * 100,
+        delta=0.1,
+    )
+
+  def test_get_timestamp_from_log_entry_ignores_durations_and_nones(self):
+    """Validates get_timestamp_from_log_entry ignores duration fields and None values."""
+    expected_ts = 1787865289.9484715
+    entry = {
+        'time_between_consecutive_saves_sec': 1008.38,
+        'preemption_received_at': None,
+        'checkpoint_manager_blocking_duration_secs': 2.86,
+        'checkpoint_manager_blocking_start_time': expected_ts,
+        'get_old_steps_start_time': expected_ts + 2.86,
+        'synchronous': True,
+    }
+    ts = get_timestamp_from_log_entry(entry)
+    self.assertIsNotNone(ts)
+    self.assertAlmostEqual(ts.timestamp(), expected_ts, places=3)
+
+  def test_checkpoint_save_multi_worker_averaging_and_local_plus_persistent(
+      self,
+  ):
+    """Validates multi-worker save averaging and local+persistent saves."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 17, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Step 0: 4s compute + 4s avg persistent save (3s and 5s across 2 workers)
+    # + 2s local save = 10s total delta.
+    s0 = job_start_time
+    self.goodput_recorder.record_step_start_time(0, s0)
+    for worker_save_dur in (3.0, 5.0):
+      self.mock_cloud_logger.write_cloud_logging_entry(
+          asdict(
+              MockSaveStepStatistics(
+                  step=0,
+                  event_type='save',
+                  directory='gs://bucket/persistent',
+                  checkpoint_manager_blocking_start_time=s0.timestamp() + 4.0,
+                  checkpoint_manager_blocking_duration_secs=worker_save_dur,
+                  synchronous=True,
+              )
+          )
+      )
+    self.mock_cloud_logger.write_cloud_logging_entry(
+        asdict(
+            MockSaveStepStatistics(
+                step=0,
+                event_type='save',
+                directory='/local/ramdisk/ckpt',
+                checkpoint_manager_blocking_start_time=s0.timestamp() + 8.0,
+                checkpoint_manager_blocking_duration_secs=2.0,
+                synchronous=True,
+            )
+        )
+    )
+
+    # Step 1: 4s compute + 1.5s local save + 2.5s persistent save (with
+    # checkpoint_manager_blocking_start_time=None to exercise
+    # _compute_remaining_checkpoint_save_badput).
+    s1 = s0 + datetime.timedelta(seconds=10)
+    self.goodput_recorder.record_step_start_time(1, s1)
+    self.mock_cloud_logger.write_cloud_logging_entry(
+        asdict(
+            MockSaveStepStatistics(
+                step=1,
+                event_type='save',
+                directory='/local/ramdisk/ckpt',
+                checkpointer_blocking_start_time=s1.timestamp() + 1.0,
+                checkpoint_manager_blocking_duration_secs=1.5,
+                synchronous=True,
+            )
+        )
+    )
+    self.mock_cloud_logger.write_cloud_logging_entry(
+        asdict(
+            MockSaveStepStatistics(
+                step=1,
+                event_type='save',
+                directory='gs://bucket/persistent',
+                checkpointer_blocking_start_time=s1.timestamp() + 2.0,
+                checkpoint_manager_blocking_duration_secs=2.5,
+                synchronous=True,
+            )
+        )
+    )
+
+    # Step 2: 4s compute.
+    s2 = s1 + datetime.timedelta(seconds=8)
+    self.goodput_recorder.record_step_start_time(2, s2)
+    job_end = s2 + datetime.timedelta(seconds=4)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    # Total job time = 22s. Productive time = 3 steps * 4s = 12s.
+    # Checkpoint save badput = (4s + 2s on Step 0) + (1.5s + 2.5s on Step 1).
+    goodput_pct, breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertAlmostEqual(goodput_pct, (12.0 / 22.0) * 100, delta=0.1)
+    self.assertAlmostEqual(
+        breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME],
+        (10.0 / 22.0) * 100,
+        delta=0.1,
+    )
+
+  def test_multi_segment_rollback_to_earlier_step_than_previous_segment(self):
+    """Validates rollback to a step earlier than the disrupted segment start."""
+    t0 = datetime.datetime(2026, 8, 27, 18, 0, 0, tzinfo=datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(t0)
+
+    # Run 1 executes steps 0, 1, 2 (5s each), disrupted at step 3 (t=15s).
+    self.goodput_recorder.record_step_start_time(0, t0)
+    self.goodput_recorder.record_step_start_time(
+        1, t0 + datetime.timedelta(seconds=5)
+    )
+    self.goodput_recorder.record_step_start_time(
+        2, t0 + datetime.timedelta(seconds=10)
+    )
+    self.goodput_recorder.record_step_start_time(
+        3, t0 + datetime.timedelta(seconds=15)
+    )
+
+    # Run 2 restarts at t=20s from local checkpoint at step 2, runs 2->3 (5s).
+    t_r2 = t0 + datetime.timedelta(seconds=20)
+    self.goodput_recorder.record_job_start_time(t_r2)
+    self.goodput_recorder.record_step_start_time(2, t_r2)
+    self.goodput_recorder.record_step_start_time(
+        3, t_r2 + datetime.timedelta(seconds=5)
+    )
+
+    # Run 3 restarts at t=30s from older persistent checkpoint at step 1
+    # (curr_step=1 < Run 2 min_step=2) and runs steps 1, 2, 3 to completion.
+    t_r3 = t0 + datetime.timedelta(seconds=30)
+    self.goodput_recorder.record_job_start_time(t_r3)
+    self.goodput_recorder.record_step_start_time(1, t_r3)
+    self.goodput_recorder.record_step_start_time(
+        2, t_r3 + datetime.timedelta(seconds=5)
+    )
+    self.goodput_recorder.record_step_start_time(
+        3, t_r3 + datetime.timedelta(seconds=10)
+    )
+    job_end = t_r3 + datetime.timedelta(seconds=15)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    # Total time = 45s. Productive = 4 steps * 5s = 20s.
+    # Wasted progress = Run 1 steps 1,2 (10s) + Run 2 step 2 (5s) = 15s.
+    # Infra recovery = (20-15) + (30-25) = 10s.
+    goodput_pct, breakdown, max_step = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertEqual(max_step, 3)
+    self.assertAlmostEqual(goodput_pct, (20.0 / 45.0) * 100, delta=0.1)
+    self.assertAlmostEqual(
+        breakdown[BadputType.WASTED_PROGRESS_FROM_DISRUPTION],
+        (15.0 / 45.0) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION],
+        (10.0 / 45.0) * 100,
+        delta=0.1,
+    )
+
+
 if __name__ == '__main__':
   googletest.main()

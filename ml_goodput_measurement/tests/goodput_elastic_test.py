@@ -178,6 +178,7 @@ class ElasticGoodputCalculatorTest(googletest.TestCase):
     self.goodput_calculator = goodput_elastic.ElasticGoodputCalculator(
         self.job_name, self.logger_name, self.mock_cloud_logger
     )
+    self.goodput_calculator._goodput_cache.clear_cache()
 
   def test_compute_time_weighted_efficiency(self):
 
@@ -311,6 +312,149 @@ class ElasticGoodputCalculatorTest(googletest.TestCase):
     expected_avail_eff = (28800.0 * 0.5 + 3620.0 * 1.0) / 32420.0
     self.assertAlmostEqual(
         details['available_slice_efficiency'], expected_avail_eff
+    )
+
+  def test_elastic_sequential_restart_without_job_start_time(self):
+    """Validates in-process elastic restart splits segment, credits step, and discounts restore overlap."""
+    job_start = datetime.datetime(
+        2026, 8, 27, 16, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start)
+
+    # Segment 1: Steps 0, 1, 2 (each 2s steady-state; Step 0 has +5s startup)
+    s0 = job_start
+    self.goodput_recorder.record_step_start_time(0, s0)
+    s1 = s0 + datetime.timedelta(seconds=7)  # 2s + 5s compilation
+    self.goodput_recorder.record_step_start_time(1, s1)
+    s2 = s1 + datetime.timedelta(seconds=2)
+    self.goodput_recorder.record_step_start_time(2, s2)
+
+    # Step 2 executes for 2s (finishes at s2 + 2s), then 10s uninstrumented gap
+    # before elastic_wait_start_time (no job_start_time logged!).
+    wait_start = s2 + datetime.timedelta(seconds=12)
+    self.goodput_recorder.record_elastic_wait_start_time(
+        'slice_down', wait_start
+    )
+    wait_end = wait_start + datetime.timedelta(seconds=3)
+    self.goodput_recorder.record_elastic_wait_end_time('slice_down', wait_end)
+
+    # Elastic reinit: 20s total, containing 12s checkpoint restore
+    reinit_start = wait_end
+    reinit_end = reinit_start + datetime.timedelta(seconds=20)
+    self.goodput_recorder.record_elastic_reinit_start_time(reinit_start)
+    self.mock_cloud_logger.write_cloud_logging_entry({
+        'event_type': 'restore',
+        'step': 2,
+        'directory': 'gs://bucket/path',
+        'checkpoint_manager_start_time': reinit_start.timestamp() + 2.0,
+        'checkpoint_manager_duration_secs': 12.0,
+        'checkpointer_duration_secs': 12.0,
+    })
+    self.goodput_recorder.record_elastic_reinit_end_time(reinit_end)
+
+    # Synchronous data loading after elastic reinit: 4s
+    dl_start = reinit_end
+    dl_end = dl_start + datetime.timedelta(seconds=4)
+    self.goodput_recorder.record_data_loading_start_time(dl_start)
+    self.goodput_recorder.record_data_loading_end_time(dl_end)
+
+    # Segment 2 resumes sequentially at Step 3 (+6s recompilation on Step 3)
+    s3 = dl_end
+    self.goodput_recorder.record_step_start_time(3, s3)
+    s4 = s3 + datetime.timedelta(seconds=8)  # 2s + 6s compilation
+    self.goodput_recorder.record_step_start_time(4, s4)
+    job_end = s4 + datetime.timedelta(seconds=2)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    self.goodput_calculator._fetch_new_entries(job_end)
+    prod, unprod, max_step, _ = (
+        self.goodput_calculator._get_current_productive_and_unproductive_time()
+    )
+
+    # 5 steps (0, 1, 2, 3, 4) * 2s = 10s productive time
+    self.assertAlmostEqual(prod, 10.0, delta=0.1)
+    self.assertEqual(max_step, 4)
+    # Startup compilation = 5s (Segment 1) + 6s (Segment 2) = 11s
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.PROGRAM_STARTUP], 11.0, delta=0.1
+    )
+    # Infra recovery gap before elastic_wait = (12s - 2s credited Step 2) = 10s
+    self.assertAlmostEqual(
+        unprod[
+            goodput_utils.BadputType.INFRASTRUCTURE_RECOVERY_FROM_DISRUPTION
+        ],
+        10.0,
+        delta=0.1,
+    )
+    # Elastic slice down = 3s, Elastic reinit = 20s, Restore discounted to 0s
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.ELASTIC_SLICE_DOWN], 3.0, delta=0.1
+    )
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.ELASTIC_REINITIALIZATION],
+        20.0,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        0.0,
+        delta=0.1,
+    )
+    # Post-reinit data loading classified as DATA_LOADING_SYNC (4s)
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.DATA_LOADING_SYNC], 4.0, delta=0.1
+    )
+
+  def test_multi_worker_restore_inside_elastic_reinit(self):
+    """Validates multi-worker restore logs inside elastic_reinit are averaged."""
+    t0 = datetime.datetime(2026, 8, 27, 16, 0, 0, tzinfo=datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(t0)
+
+    # Initial job restore at Step 0 outside elastic_reinit: 5s
+    self.mock_cloud_logger.write_cloud_logging_entry({
+        'event_type': 'restore',
+        'step': 0,
+        'directory': 'gs://bucket/path',
+        'checkpoint_manager_start_time': t0.timestamp() + 1.0,
+        'checkpoint_manager_duration_secs': 5.0,
+        'checkpointer_duration_secs': 5.0,
+    })
+
+    s0 = t0 + datetime.timedelta(seconds=6)
+    self.goodput_recorder.record_step_start_time(0, s0)
+    s1 = s0 + datetime.timedelta(seconds=2)
+    self.goodput_recorder.record_step_start_time(1, s1)
+
+    # Elastic reinit at Step 1: 15s total, with 2 workers logging a 6s restore.
+    reinit_start = s1 + datetime.timedelta(seconds=2)
+    reinit_end = reinit_start + datetime.timedelta(seconds=15)
+    self.goodput_recorder.record_elastic_reinit_start_time(reinit_start)
+    for _ in range(2):
+      self.mock_cloud_logger.write_cloud_logging_entry({
+          'event_type': 'restore',
+          'step': 1,
+          'directory': 'gs://bucket/path',
+          'checkpoint_manager_start_time': reinit_start.timestamp() + 2.0,
+          'checkpoint_manager_duration_secs': 6.0,
+          'checkpointer_duration_secs': 6.0,
+      })
+    self.goodput_recorder.record_elastic_reinit_end_time(reinit_end)
+
+    s2 = reinit_end
+    self.goodput_recorder.record_step_start_time(2, s2)
+    job_end = s2 + datetime.timedelta(seconds=2)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    self.goodput_calculator._fetch_new_entries(job_end)
+    _, unprod, _, _ = (
+        self.goodput_calculator._get_current_productive_and_unproductive_time()
+    )
+    # Initial 5s restore outside reinit is preserved; the 6s restore inside
+    # reinit (logged by 2 workers) is averaged to 6s and discounted once.
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        5.0,
+        delta=0.1,
     )
 
 

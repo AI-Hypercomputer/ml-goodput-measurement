@@ -382,6 +382,11 @@ class CheckpointBadputCalculator:
       )
     return vertical_step_stats
 
+  @staticmethod
+  def _get_duration_stat(step_stats: Dict[str, str], key: str) -> float:
+    """Safely extracts a float duration in seconds, defaulting None to 0.0."""
+    return float(step_stats.get(key) or 0.0)
+
   def calculate_save_operation_checkpoint_manager_blocking_time(
       self, operation_type: Optional[str] = OPERATION_TYPE_PERSISTENT_AND_LOCAL,
   ) -> SaveCheckpointManagerVerticalStepStats:
@@ -408,36 +413,42 @@ class CheckpointBadputCalculator:
         step_already_processed[step_info].step = step_info
         step_already_processed[
             step_info
-        ].total_checkpoint_manager_blocking_time = float(
-            step_stats[_CHECKPOINT_MANAGER_SAVE_DURATION_SECS]
+        ].total_checkpoint_manager_blocking_time = self._get_duration_stat(
+            step_stats, _CHECKPOINT_MANAGER_SAVE_DURATION_SECS
         )
         step_already_processed[step_info].total_checkpointer_blocking_time = (
-            float(step_stats[_CHECKPOINTER_SAVE_DURATION_SECS])
+            self._get_duration_stat(
+                step_stats, _CHECKPOINTER_SAVE_DURATION_SECS
+            )
         )
-        step_already_processed[step_info].total_wait_for_prev_time = float(
-            step_stats[_WAIT_FOR_PREV_DURATION_SECS]
+        step_already_processed[step_info].total_wait_for_prev_time = (
+            self._get_duration_stat(step_stats, _WAIT_FOR_PREV_DURATION_SECS)
         )
-        step_already_processed[step_info].total_get_old_steps_time = float(
-            step_stats[_GET_OLD_STEPS_DURATION_SECS]
+        step_already_processed[step_info].total_get_old_steps_time = (
+            self._get_duration_stat(step_stats, _GET_OLD_STEPS_DURATION_SECS)
         )
         step_already_processed[step_info].occurrence = 1
       else:
         step_already_processed[step_info].step = step_info
         step_already_processed[
             step_info
-        ].total_checkpoint_manager_blocking_time += float(
-            step_stats[_CHECKPOINT_MANAGER_SAVE_DURATION_SECS]
+        ].total_checkpoint_manager_blocking_time += self._get_duration_stat(
+            step_stats, _CHECKPOINT_MANAGER_SAVE_DURATION_SECS
         )
         step_already_processed[
             step_info
-        ].total_checkpointer_blocking_time += float(
-            step_stats[_CHECKPOINTER_SAVE_DURATION_SECS]
+        ].total_checkpointer_blocking_time += self._get_duration_stat(
+            step_stats, _CHECKPOINTER_SAVE_DURATION_SECS
         )
-        step_already_processed[step_info].total_wait_for_prev_time += float(
-            step_stats[_WAIT_FOR_PREV_DURATION_SECS]
+        step_already_processed[
+            step_info
+        ].total_wait_for_prev_time += self._get_duration_stat(
+            step_stats, _WAIT_FOR_PREV_DURATION_SECS
         )
-        step_already_processed[step_info].total_get_old_steps_time += float(
-            step_stats[_GET_OLD_STEPS_DURATION_SECS]
+        step_already_processed[
+            step_info
+        ].total_get_old_steps_time += self._get_duration_stat(
+            step_stats, _GET_OLD_STEPS_DURATION_SECS
         )
         step_already_processed[step_info].occurrence += 1
 
@@ -591,11 +602,15 @@ class CheckpointBadputCalculator:
         step_already_processed[step_info] = RestoreProcessedStep()
         step_already_processed[step_info].step = step_info
 
-        step_already_processed[step_info].total_checkpoint_manager_time = float(
-            step_stats[_CHECKPOINT_MANAGER_RESTORE_DURATION_SECS]
+        step_already_processed[step_info].total_checkpoint_manager_time = (
+            self._get_duration_stat(
+                step_stats, _CHECKPOINT_MANAGER_RESTORE_DURATION_SECS
+            )
         )
-        step_already_processed[step_info].total_restore_time = float(
-            step_stats[_CHECKPOINTER_RESTORE_DURATION_SECS]
+        step_already_processed[step_info].total_restore_time = (
+            self._get_duration_stat(
+                step_stats, _CHECKPOINTER_RESTORE_DURATION_SECS
+            )
         )
         if (
             step_stats.get(_BROADCAST_DURATION_SECS)
@@ -610,11 +625,13 @@ class CheckpointBadputCalculator:
         step_already_processed[step_info].step = step_info
         step_already_processed[
             step_info
-        ].total_checkpoint_manager_time += float(
-            step_stats[_CHECKPOINT_MANAGER_RESTORE_DURATION_SECS]
+        ].total_checkpoint_manager_time += self._get_duration_stat(
+            step_stats, _CHECKPOINT_MANAGER_RESTORE_DURATION_SECS
         )
-        step_already_processed[step_info].total_restore_time += float(
-            step_stats[_CHECKPOINTER_RESTORE_DURATION_SECS]
+        step_already_processed[
+            step_info
+        ].total_restore_time += self._get_duration_stat(
+            step_stats, _CHECKPOINTER_RESTORE_DURATION_SECS
         )
         if (
             step_stats.get(_BROADCAST_DURATION_SECS)
@@ -671,6 +688,3 @@ if  __name__ == '__main__':
   checkpoint_badput_calculator.calculate_save_operation_checkpoint_manager_blocking_time(
       args.operation_type
   )
-
-
-

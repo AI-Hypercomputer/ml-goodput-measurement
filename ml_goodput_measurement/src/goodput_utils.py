@@ -13,7 +13,7 @@ from urllib3.util import retry
 
 
 Retry = retry.Retry
-_TIME_ENTRY = 'time'
+_TIMESTAMP_SUFFIXES = ('_time', '_timestamp', '_at')
 _METADATA_SERVER_URL = 'http://metadata.google.internal/computeMetadata/v1/'
 _METADATA_HEADERS = {'Metadata-Flavor': 'Google'}
 
@@ -95,6 +95,14 @@ class BadputType(enum.Enum):
   ELASTIC_SLICE_DOWN = 12
   ELASTIC_SCALE_UP = 13
   ELASTIC_REINITIALIZATION = 14
+
+
+class RestartType(enum.Enum):
+  """The type of job or elastic restart."""
+
+  INFRA_RESTART = 'infra_restart'
+  ELASTIC_SLICE_DOWN = 'elastic_slice_down'
+  ELASTIC_SCALE_UP = 'elastic_scale_up'
 
 
 class WorkloadMetricDetails(TypedDict):
@@ -318,16 +326,37 @@ def get_extra_time_from_anomalous_steps(step_times: list[Any]) -> float:
 def get_timestamp_from_log_entry(
     entry: dict[str, Any],
 ) -> Optional[datetime.datetime]:
-  """Helper function to get the timestamp from a log entry."""
-  timestamp_posix_time = [
-      entry_value
+  """Extracts the earliest valid POSIX timestamp from a structured log entry.
+
+  Matches keys ending with `_time`, `_timestamp`, or `_at`
+  (`_TIMESTAMP_SUFFIXES`)
+  to structurally exclude duration fields (such as `*_duration_secs` or
+  `time_between_consecutive_saves_sec`) and ignores `None` or boolean values.
+
+  Args:
+    entry: Dictionary payload of a Cloud Logging entry.
+
+  Returns:
+    The earliest UTC datetime found in the entry, or None if no valid timestamp
+    field exists.
+  """
+  # Only consider numeric (non-boolean) values for keys with timestamp suffixes.
+  valid_timestamps = [
+      float(entry_value)
       for entry_label, entry_value in entry.items()
-      if _TIME_ENTRY in entry_label
+      if entry_label.endswith(_TIMESTAMP_SUFFIXES)
+      and isinstance(entry_value, (int, float))
+      and not isinstance(entry_value, bool)
   ]
-  if timestamp_posix_time:
-    return datetime.datetime.fromtimestamp(
-        timestamp_posix_time[0], datetime.timezone.utc
-    )
+  if valid_timestamps:
+    try:
+      # When an entry contains multiple phase timestamps (e.g., checkpoint save
+      # sub-operations), return the earliest timestamp representing event start.
+      return datetime.datetime.fromtimestamp(
+          min(valid_timestamps), datetime.timezone.utc
+      )
+    except (ValueError, TypeError, OverflowError):
+      pass
   return None
 
 

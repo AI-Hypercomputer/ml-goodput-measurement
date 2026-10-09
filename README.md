@@ -136,7 +136,7 @@ project, then do the following:
  and read from.
 
  > **IMPORTANT:** Please use a unique `run_name` for each individual experiment
- or workload that you intend to monitor separately. If you unintentionally re-use
+ or workload that you intend to monitor separately. If you unintentionally reuse
  `run_name` or `goodput_logger_name` in the same storage bucket of a GCP project,
  your cumulative Goodput metrics may be inaccurately taking previous runs into
  account.
@@ -498,7 +498,7 @@ this window and the number of disruptions within the interval window.
 > **_IMPORTANT:_** **Do NOT use this API if** your workload has been manually
  disrupted.
 
-> **_IMPORTANT:_** **Do NOT use this API if** you have accidentally re-used a
+> **_IMPORTANT:_** **Do NOT use this API if** you have accidentally reused a
  previous `run_name`.
 
 ```python
@@ -596,6 +596,8 @@ Following metrics are uploaded:
   - Disruptions Count
   - Step Time Deviation
   - Ideal Step Time
+  - Stepping & Available Slice Efficiency (Elastic only, see
+    [Elastic Goodput](#elastic-goodput))
 
 ```python
 goodput_monitor.start_goodput_uploader()
@@ -633,6 +635,8 @@ Following metrics are uploaded:
 
   - Rolling Window Goodput
   - Rolling Window Badput Breakdown
+  - Rolling Window Stepping & Available Slice Efficiency (Elastic only, see
+    [Elastic Goodput](#elastic-goodput))
 
 ```python
 goodput_monitor.start_rolling_window_goodput_uploader(rolling_windows_seconds=[60, 300, 900])
@@ -680,6 +684,23 @@ The metrics currently sent to Google Cloud Monitoring are:
   [workload/step_time_deviation](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/step_time_deviation)
 - **Ideal Step Time:**
   [workload/performance](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/performance)
+- **Stepping Slice Efficiency** (Elastic only):
+  [workload/stepping_slice_efficiency](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/stepping_slice_efficiency)
+- **Available Slice Efficiency** (Elastic only):
+  [workload/available_slice_efficiency](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload/available_slice_efficiency)
+
+The slice efficiency metrics are only uploaded when using
+`ElasticGoodputMonitor` with `include_slice_efficiency=True` (see
+[Elastic Goodput](#elastic-goodput)). They are reported with
+`window_type=CUMULATIVE` by the cumulative uploader and with
+`window_type=INTERVAL` (one series per `rolling_window_size`) by the rolling
+window uploader.
+
+> **_NOTE:_** Cloud Monitoring also defines a per-process
+> [workload_process/heartbeat](https://cloud.google.com/monitoring/api/metrics_gcp#:~:text=workload_process/heartbeat)
+> metric. It is attached to the separate `compute.googleapis.com/WorkloadProcess`
+> monitored resource (identified per worker process) and is **not** emitted by
+> this library.
 
 This feature leverages Google VM metadata (project ID, location, accelerator type)
 and supports replica IDs for uniquely identifying workloads in multi-replica
@@ -769,10 +790,12 @@ goodput_monitor = monitoring.GoodputMonitor(
       include_badput_breakdown=True,
       gcp_options=gcp_options
     )
+```
 
 ## Elastic Goodput
 
 For elastic training workloads (which support autoscaling and dynamic slice adjustments), the library provides elastic-aware components under `ml_goodput_measurement.goodput_elastic` and `ml_goodput_measurement.monitoring_elastic`.
+
 ### New Badput Buckets & Slice Efficiency
 By adopting the Elastic APIs, the following metrics will be automatically calculated and uploaded to your dashboards:
 *   **Elastic Badput Breakdown**: Separates dynamic node provisioning disruptions into distinct categories:
@@ -836,5 +859,4 @@ def record_slice_state(recorder, active_slices_override=None):
 def record_elastic_scale():
     recorder.record_elastic_wait_start_time(event_type="elastic_scale_up")
     record_slice_state(recorder, active_slices_override=0)
-```
 ```

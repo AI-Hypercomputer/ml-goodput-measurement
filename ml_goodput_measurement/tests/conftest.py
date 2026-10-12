@@ -22,7 +22,14 @@ _cloud_goodput.__path__ = [str(pathlib.Path(__file__).parent.parent.parent)]
 _cloud_goodput.__package__ = 'cloud_goodput'
 sys.modules['cloud_goodput'] = _cloud_goodput
 
+from absl import flags as _flags
 from absl.testing import absltest as _absltest
+
+# absltest.main() is not invoked under pytest, so absl flags are never parsed.
+# Mark them as parsed so tests can use flag defaults (e.g. --test_tmpdir, which
+# is required by absltest.TestCase.create_tempdir()).
+if not _flags.FLAGS.is_parsed():
+  _flags.FLAGS.mark_as_parsed()
 
 _g3 = types.ModuleType('google3')
 _g3_testing = types.ModuleType('google3.testing')

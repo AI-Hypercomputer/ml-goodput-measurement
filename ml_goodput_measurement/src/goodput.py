@@ -298,6 +298,11 @@ class _CloudLogger:
     return entry_payload, (current_last_entry_ts, current_last_entry_id)
 
 
+def _opt_float(value: Optional[float]) -> Optional[float]:
+  """Coerces an optional number to a JSON-serializable float."""
+  return None if value is None else float(value)
+
+
 class GoodputRecorder:
   """The Goodput recorder class, responsible for recording Goodput metrics from the user application.
 
@@ -383,20 +388,134 @@ class GoodputRecorder:
         _STEP_START_TIME: start_time.timestamp(),
     })
 
-  def record_checkpoint_progress(self, step, checkpoint_start_time):
-    """Main recorder function to log information on a successful checkpoint.
+  def record_checkpoint_save_stats(
+      self,
+      *,
+      step: int,
+      directory: str,
+      checkpoint_manager_blocking_start_time: float,
+      checkpoint_manager_blocking_duration_secs: float,
+      synchronous: bool = False,
+      wait_for_prev_start_time: Optional[float] = None,
+      wait_for_prev_duration_secs: float = 0.0,
+      get_old_steps_start_time: Optional[float] = None,
+      get_old_steps_duration_secs: float = 0.0,
+      checkpointer_blocking_start_time: Optional[float] = None,
+      checkpointer_blocking_duration_secs: float = 0.0,
+  ):
+    """Main recorder function to log the blocking time of one checkpoint save.
 
-    This method is intended to log the progress for a checkpoint (last step
-    included in the checkpoint) and when the checkpoint starts. This information
-    will be retrieved in the future to determine whether training progress from
-    a completed step contributes to Goodput or wasted progress Badput.
+    Use this from checkpointing frameworks other than Orbax (which writes this
+    entry itself) so the save shows up in `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME`.
+    Write at most one entry per step: entries for the same step are averaged.
 
     Args:
-      step: The step count of the last step included in the saved checkpoint.
-      checkpoint_start_time: Timestamp at which the checkpoint containing
-        progress upto "step" starts to save.
+      step: The training step the checkpoint was saved at.
+      directory: The checkpoint directory; a `gs://` path counts as a
+        persistent save, anything else as a local save.
+      checkpoint_manager_blocking_start_time: UTC POSIX timestamp at which the
+        training loop started blocking on the save.
+      checkpoint_manager_blocking_duration_secs: Total time the training loop
+        was blocked, in seconds. Must be positive.
+      synchronous: Whether the save ran synchronously (no async upload).
+      wait_for_prev_start_time: Start of waiting for the previous async save.
+      wait_for_prev_duration_secs: Time spent waiting for the previous save.
+      get_old_steps_start_time: Start of removing old checkpoints.
+      get_old_steps_duration_secs: Time spent removing old checkpoints.
+      checkpointer_blocking_start_time: Start of the blocking part of the write
+        (for example the device to host copy).
+      checkpointer_blocking_duration_secs: Time spent in that blocking part.
+
+    Raises:
+      ValueError: If `checkpoint_manager_blocking_duration_secs` is not
+        positive; such an entry would dilute the per-step average in the
+        calculator.
     """
-    pass
+    if checkpoint_manager_blocking_duration_secs <= 0:
+      raise ValueError(
+          'checkpoint_manager_blocking_duration_secs must be positive, got'
+          f' {checkpoint_manager_blocking_duration_secs}'
+      )
+    if self._cloud_logger is None:
+      return
+    self._cloud_logger.write_cloud_logging_entry({
+        _JOB_NAME: self.job_name,
+        'event_type': checkpoint_badput_calculator.OPERATION_TYPE_SAVE,
+        'step': int(step),
+        'directory': directory,
+        'synchronous': bool(synchronous),
+        'checkpoint_manager_blocking_start_time': float(
+            checkpoint_manager_blocking_start_time
+        ),
+        'checkpoint_manager_blocking_duration_secs': float(
+            checkpoint_manager_blocking_duration_secs
+        ),
+        'wait_for_prev_start_time': _opt_float(wait_for_prev_start_time),
+        'wait_for_prev_duration_secs': float(wait_for_prev_duration_secs),
+        'get_old_steps_start_time': _opt_float(get_old_steps_start_time),
+        'get_old_steps_duration_secs': float(get_old_steps_duration_secs),
+        'checkpointer_blocking_start_time': _opt_float(
+            checkpointer_blocking_start_time
+        ),
+        'checkpointer_blocking_duration_secs': float(
+            checkpointer_blocking_duration_secs
+        ),
+    })
+
+  def record_checkpoint_restore_stats(
+      self,
+      *,
+      step: int,
+      directory: str,
+      checkpoint_manager_start_time: float,
+      checkpoint_manager_duration_secs: float,
+      checkpointer_duration_secs: Optional[float] = None,
+      broadcast_duration_secs: Optional[float] = None,
+  ):
+    """Main recorder function to log the time of one checkpoint restore.
+
+    Use this from checkpointing frameworks other than Orbax (which writes this
+    entry itself) so the restore shows up in
+    `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`.
+
+    Args:
+      step: The training step that was restored.
+      directory: The checkpoint directory; a `gs://` path counts as a
+        persistent restore, anything else as a local restore.
+      checkpoint_manager_start_time: UTC POSIX timestamp at which the restore
+        started.
+      checkpoint_manager_duration_secs: Total restore time, in seconds. Must be
+        positive.
+      checkpointer_duration_secs: Time spent reading the checkpoint itself;
+        defaults to the total.
+      broadcast_duration_secs: Time spent broadcasting the restored state to
+        other replicas, if any.
+
+    Raises:
+      ValueError: If `checkpoint_manager_duration_secs` is not positive.
+    """
+    if checkpoint_manager_duration_secs <= 0:
+      raise ValueError(
+          'checkpoint_manager_duration_secs must be positive, got'
+          f' {checkpoint_manager_duration_secs}'
+      )
+    if self._cloud_logger is None:
+      return
+    if checkpointer_duration_secs is None:
+      checkpointer_duration_secs = checkpoint_manager_duration_secs
+    self._cloud_logger.write_cloud_logging_entry({
+        _JOB_NAME: self.job_name,
+        'event_type': checkpoint_badput_calculator.OPERATION_TYPE_RESTORE,
+        'step': int(step),
+        'directory': directory,
+        'checkpoint_manager_start_time': float(checkpoint_manager_start_time),
+        'checkpoint_manager_duration_secs': float(
+            checkpoint_manager_duration_secs
+        ),
+        'checkpointer_start_time': float(checkpoint_manager_start_time),
+        'checkpointer_duration_secs': float(checkpointer_duration_secs),
+        'broadcast_duration_secs': _opt_float(broadcast_duration_secs),
+    })
 
   def record_job_start_time(
       self, start_time: Optional[datetime.datetime] = None

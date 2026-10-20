@@ -3001,5 +3001,170 @@ class GoodputExclusionIntegrationTest(googletest.TestCase):
     )
 
 
+class CheckpointRecorderTest(googletest.TestCase):
+  """Tests the public checkpoint save/restore recorder methods."""
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
+    self.logger_name = 'test-log'
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput.GoodputRecorder(
+        self.job_name, self.logger_name, True, self.mock_cloud_logger
+    )
+    self.goodput_calculator = goodput.GoodputCalculator(
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.create_tempdir().full_path,
+    )
+
+  def _entries(self):
+    entries, _ = self.mock_cloud_logger.read_cloud_logging_entries()
+    return entries
+
+  def test_save_entry_matches_the_orbax_shape(self):
+    self.goodput_recorder.record_checkpoint_save_stats(
+        step=1,
+        directory='gs://bucket/path',
+        checkpoint_manager_blocking_start_time=10.0,
+        checkpoint_manager_blocking_duration_secs=6.0,
+        synchronous=True,
+        wait_for_prev_start_time=10.0,
+        wait_for_prev_duration_secs=1.0,
+        get_old_steps_start_time=13.0,
+        get_old_steps_duration_secs=3.0,
+        checkpointer_blocking_start_time=12.0,
+        checkpointer_blocking_duration_secs=2.0,
+    )
+    expected = asdict(
+        MockSaveStepStatistics(
+            step=1,
+            directory='gs://bucket/path',
+            synchronous=True,
+            wait_for_prev_start_time=10.0,
+            wait_for_prev_duration_secs=1.0,
+            checkpointer_blocking_start_time=12.0,
+            checkpointer_blocking_duration_secs=2.0,
+            get_old_steps_start_time=13.0,
+            get_old_steps_duration_secs=3.0,
+            checkpoint_manager_blocking_start_time=10.0,
+            checkpoint_manager_blocking_duration_secs=6.0,
+        )
+    )
+    # Orbax's preemption fields are not part of the public API.
+    del expected['reached_preemption'], expected['preemption_received_at']
+    self.assertEqual(
+        self._entries(), [{goodput._JOB_NAME: self.job_name, **expected}]
+    )
+
+  def test_restore_entry_matches_the_orbax_shape(self):
+    self.goodput_recorder.record_checkpoint_restore_stats(
+        step=1,
+        directory='gs://bucket/path',
+        checkpoint_manager_start_time=10.0,
+        checkpoint_manager_duration_secs=2.0,
+    )
+    expected = asdict(
+        MockRestoreStepStatistics(
+            step=1,
+            directory='gs://bucket/path',
+            checkpointer_start_time=10.0,
+            checkpointer_duration_secs=2.0,
+            checkpoint_manager_start_time=10.0,
+            checkpoint_manager_duration_secs=2.0,
+        )
+    )
+    self.assertEqual(
+        self._entries(),
+        [{
+            goodput._JOB_NAME: self.job_name,
+            **expected,
+            'broadcast_duration_secs': None,
+        }],
+    )
+
+  def test_non_positive_durations_are_rejected(self):
+    with self.assertRaises(ValueError):
+      self.goodput_recorder.record_checkpoint_save_stats(
+          step=1,
+          directory='/tmp/ckpt',
+          checkpoint_manager_blocking_start_time=10.0,
+          checkpoint_manager_blocking_duration_secs=0.0,
+      )
+    with self.assertRaises(ValueError):
+      self.goodput_recorder.record_checkpoint_restore_stats(
+          step=1,
+          directory='/tmp/ckpt',
+          checkpoint_manager_start_time=10.0,
+          checkpoint_manager_duration_secs=-1.0,
+      )
+    self.assertEmpty(self._entries())
+
+  def test_logging_disabled_writes_nothing(self):
+    recorder = goodput.GoodputRecorder(
+        self.job_name, self.logger_name, False, None
+    )
+    recorder.record_checkpoint_save_stats(
+        step=1,
+        directory='/tmp/ckpt',
+        checkpoint_manager_blocking_start_time=10.0,
+        checkpoint_manager_blocking_duration_secs=1.0,
+    )
+    recorder.record_checkpoint_restore_stats(
+        step=1,
+        directory='/tmp/ckpt',
+        checkpoint_manager_start_time=10.0,
+        checkpoint_manager_duration_secs=1.0,
+    )
+    self.assertEmpty(self._entries())
+
+  def test_recorded_entries_land_in_the_checkpoint_badput_buckets(self):
+    job_start_time = datetime.datetime.now(datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    step_start_time = job_start_time + _TEST_PROGRAM_STARTUP_TIME
+    restore_secs = 2.0
+    save_secs = 4.0
+    self.goodput_recorder.record_checkpoint_restore_stats(
+        step=0,
+        directory='gs://bucket/path',
+        checkpoint_manager_start_time=job_start_time.timestamp(),
+        checkpoint_manager_duration_secs=restore_secs,
+    )
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+      if step == 2:
+        self.goodput_recorder.record_checkpoint_save_stats(
+            step=step,
+            directory='/local/ckpt',
+            checkpoint_manager_blocking_start_time=step_start_time.timestamp(),
+            checkpoint_manager_blocking_duration_secs=save_secs,
+        )
+        step_start_time += datetime.timedelta(seconds=save_secs)
+    self.goodput_recorder.record_job_end_time(step_start_time)
+    total_secs = (step_start_time - job_start_time).total_seconds()
+
+    goodput_pct, badput, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+
+    self.assertAlmostEqual(
+        badput[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME],
+        save_secs / total_secs * 100,
+        delta=0.01,
+    )
+    self.assertAlmostEqual(
+        badput[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        restore_secs / total_secs * 100,
+        delta=0.01,
+    )
+    self.assertAlmostEqual(
+        goodput_pct,
+        _TEST_STEP_TIME.total_seconds() * _TEST_TOTAL_STEPS / total_secs * 100,
+        delta=0.01,
+    )
+
+
 if __name__ == '__main__':
   googletest.main()

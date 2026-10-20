@@ -300,6 +300,34 @@ def train_loop(config, state=None):
 consistent (e.g., "eval_step", "sdc_check"), to ensure accurate aggregation and
 reporting in badput breakdowns.
 
+#### Record Checkpoint Save and Restore Time (non-Orbax checkpointers)
+
+Orbax writes checkpoint save and restore statistics to the goodput log itself.
+If you checkpoint with another framework (for example PyTorch Distributed
+Checkpoint), record them with:
+
+- `record_checkpoint_save_stats(...)` once per saving step, with the time the
+  training loop was blocked (and optionally its breakdown).
+- `record_checkpoint_restore_stats(...)` once per restore.
+
+They are reported as `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` and
+`UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`. Timestamps are UTC POSIX seconds; write
+at most one save entry per step, because entries for the same step are averaged.
+Both methods raise `ValueError` on a non-positive duration, so skip the call
+when nothing blocked.
+
+```python
+start = time.time()
+checkpointer.save(step)  # blocks the training loop
+goodput_recorder.record_checkpoint_save_stats(
+    step=step,
+    directory=checkpoint_dir,  # a gs:// path counts as a persistent save
+    checkpoint_manager_blocking_start_time=start,
+    checkpoint_manager_blocking_duration_secs=time.time() - start,
+    synchronous=True,
+)
+```
+
 ### Retrieve Goodput with `GoodputCalculator`
 
 In order to retrieve the Goodput of a job run, all you need to do is instantiate
@@ -421,17 +449,14 @@ class BadputType(enum.Enum):
   detection of a planned disruption signal. The save operation in type of
   checkpointing is synchronous resulting in time lost to Badput.
 
-  > **_NOTE:_** This type of Badput is reported *only* when Orbax is used for
-     checkpointing and requires the Orbax structured logger to be configured.
-     To compute checkpointing Badput for other types of checkpointers (Non-Orbax),
-     please use the Custom Badput Recorder API (instructions in
-     [Record Custom Badput Events (e.g., Evaluation, SDC Checks)](#record-custom-badput-events-eg-evaluation-sdc-checks))
-     with an appropriate Custom Badput event type and wrap the blocking operation
-     around the `start` and the `stop` API calls.
+  > **_NOTE:_** With Orbax, this Badput is reported automatically once the
+     Orbax structured logger is configured. For other checkpointers, record it
+     with the checkpoint recorder API (instructions in
+     [Record Checkpoint Save and Restore Time (non-Orbax checkpointers)](#record-checkpoint-save-and-restore-time-non-orbax-checkpointers)).
 
-  > **_NOTE:_** Do **NOT** use the Custom Badput APIs for blocking checkpoint save
-     operations if you are using Orbax. Either use Orbax's structured checkpoint
-     logger **OR** the Custom Badput API for any other type of checkpointing.
+  > **_NOTE:_** Do **NOT** record the same checkpoint operation twice: use
+     either Orbax's structured checkpoint logger **OR** the checkpoint recorder
+     API, and do not also wrap it in a Custom Badput event.
 
  - Wasted Progress due to Disruption (WASTED_PROGRESS_FROM_DISRUPTION)
 

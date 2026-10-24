@@ -2135,9 +2135,10 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
   def _get_step_times(self, entries: list[Any]) -> dict[int, float]:
     """Computes per-step execution durations from log entries.
 
-    Excludes synchronous checkpoint save blocking durations and breaks step
-    pairings across job or elastic restarts so recovery downtime does not
-    pollute `ideal_step_time` or `step_time_deviation`.
+    Excludes custom badput events (such as evaluation) that fall entirely
+    within a step and synchronous checkpoint save blocking durations, and
+    breaks step pairings across job or elastic restarts so recovery downtime
+    does not pollute `ideal_step_time` or `step_time_deviation`.
 
     Args:
       entries: List of raw or `(timestamp, payload)` cached log entries.
@@ -2145,7 +2146,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     Returns:
       Dictionary mapping step count (`int`) to execution duration (`float`).
     """
-    normalized_entries = []
+    normalized_entries: list[dict[str, Any]] = []
     for item in entries:
       if (
           isinstance(item, tuple)
@@ -2153,18 +2154,18 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           and isinstance(item[1], dict)
       ):
         normalized_entries.append(item[1])
-      else:
+      elif isinstance(item, dict):
         normalized_entries.append(item)
 
     save_events = self._extract_checkpoint_save_events(normalized_entries)
+    custom_sync_intervals = self._extract_custom_sync_intervals(
+        normalized_entries
+    )
     step_times = {}
     previous_step_start_time = None
     previous_step_count = None
 
     for payload in normalized_entries:
-      if not isinstance(payload, dict):
-        continue
-
       # When a restart occurs after `previous_step_start_time`, do not pair
       # `previous_step_count` directly with the post-restart step timestamp.
       restart_event = self._get_restart_event(payload)
@@ -2190,6 +2191,13 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
             and step_count == previous_step_count + 1
         ):
           step_delta = step_start_time - previous_step_start_time
+          custom_sync_in_step = sum(
+              sync_end - sync_start
+              for sync_start, sync_end, _ in custom_sync_intervals
+              if previous_step_start_time <= sync_start
+              and sync_end <= step_start_time
+          )
+          step_delta = max(0.0, step_delta - custom_sync_in_step)
           checkpoint_save_in_step = (
               self._get_checkpoint_save_duration_in_window(
                   save_events,

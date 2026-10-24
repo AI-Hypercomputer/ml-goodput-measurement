@@ -165,9 +165,29 @@ class _CloudLogger:
       return
     self._async_logger.info(entry)
 
-  def flush(self) -> None:
-    """Block until every entry enqueued so far has been committed."""
-    self._async_handler.flush()
+  def flush(self, timeout_s: Optional[float] = None) -> bool:
+    """Blocks until every entry enqueued so far has been committed.
+
+    With `timeout_s`, waits at most that long and returns False (after one
+    warning) if the handler flush has not finished; None waits indefinitely.
+    """
+    if timeout_s is None:
+      self._async_handler.flush()
+      return True
+    flush_thread = threading.Thread(
+        target=self._async_handler.flush, daemon=True
+    )
+    flush_thread.start()
+    flush_thread.join(timeout_s)
+    if flush_thread.is_alive():
+      logger.warning(
+          'Cloud Logging flush for job %s did not finish within %s seconds;'
+          ' pending entries continue uploading in the background.',
+          self.job_name,
+          timeout_s,
+      )
+      return False
+    return True
 
   def _get_filter_msg(
       self,
@@ -352,15 +372,15 @@ class GoodputRecorder:
           background_max_latency_s=background_max_latency_s,
       )
 
-  def flush(self) -> None:
-    """Block until pending async writes from this recorder have committed.
+  def flush(self, timeout_s: Optional[float] = None) -> bool:
+    """Blocks until pending async writes from this recorder have committed.
 
-    Use for strict read-after-write fencing (unit tests, end-of-training
-    finalization, hand-off to another process).
+    Use for strict read-after-write fencing. Returns True once committed (or
+    if logging is disabled); with `timeout_s`, returns False if it elapses.
     """
     if self._cloud_logger is None:
-      return
-    self._cloud_logger.flush()
+      return True
+    return self._cloud_logger.flush(timeout_s=timeout_s)
 
   def record_step_start_time(
       self, step: int, start_time: Optional[datetime.datetime] = None
@@ -667,6 +687,14 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     """Syncs the underlying cache files to GCS."""
     with self._goodput_cache_lock:
       self._goodput_cache.sync_to_gcs()
+
+  def has_job_end_entry(self) -> bool:
+    """Returns whether a `job_end_time` entry has been fetched into the cache.
+
+    Only inspects the cache; it never queries Cloud Logging.
+    """
+    with self._goodput_cache_lock:
+      return self._goodput_cache.get_job_end_time() is not None
 
   def _get_total_productive_and_unproductive_time(
       self, new_entries: list[dict[str, Any]]

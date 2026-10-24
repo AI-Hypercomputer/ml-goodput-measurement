@@ -36,6 +36,7 @@ _TENSORBOARD_GOODPUT_LABEL = 'goodput'
 _TENSORBOARD_BADPUT_LABEL = 'badput'
 _TENSORBOARD_STEP_DEVIATION_LABEL = 'step_deviation'
 _PROCESS_TERMINATION_TIMEOUT_SECONDS = 10
+_JOB_END_POLL_INTERVAL_SECONDS = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,52 @@ def _query_and_upload_goodput_once(
     )
 
 
+def _wait_for_job_end_entry(
+    calculator: GoodputCalculator, config: dict, pid: int
+) -> None:
+  """Waits (bounded) until the job-end entry has been fetched into the cache.
+
+  Cloud Logging reads lag writes by a few seconds, so the `job_end_time`
+  entry written just before shutdown is usually not readable yet when the
+  final flush starts. Polls with plain queries (no upload) about once per
+  second for at most config['wait_for_job_end_seconds'].
+  """
+  wait_seconds = config.get('wait_for_job_end_seconds', 0.0)
+  if wait_seconds <= 0:
+    return
+  start = time.monotonic()
+  while not calculator.has_job_end_entry():
+    remaining = wait_seconds - (time.monotonic() - start)
+    if remaining <= 0:
+      logger.info(
+          '[PID: %s] Job end entry for job %s was not readable within %s'
+          ' seconds; the final goodput upload may not credit the last step.',
+          pid,
+          config['job_name'],
+          wait_seconds,
+      )
+      return
+    time.sleep(min(_JOB_END_POLL_INTERVAL_SECONDS, remaining))
+    try:
+      calculator.get_job_goodput(
+          include_badput_breakdown=config['include_badput_breakdown']
+      )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.warning(
+          '[PID: %s] Error while polling for the job end entry of job %s: %s',
+          pid,
+          config['job_name'],
+          e,
+      )
+  logger.info(
+      '[PID: %s] Job end entry for job %s is readable after %.1f seconds;'
+      ' proceeding with the final goodput upload.',
+      pid,
+      config['job_name'],
+      time.monotonic() - start,
+  )
+
+
 def _goodput_worker(
     config: dict,
     termination_event: synchronize.Event,
@@ -134,6 +181,7 @@ def _goodput_worker(
         logger.warning('[PID: %s] Failed to sync timeline to GCS: %s', pid, e)
 
   if final_flush_event.is_set():
+    _wait_for_job_end_entry(calculator, config, pid)
     # The calculator's cache is already warm from the loop above, so this
     # final query only fetches entries written since the last cycle.
     logger.info(
@@ -875,6 +923,8 @@ class GoodputMonitor:
       gcs_sync_interval_seconds: int = 3600,
       cache_dir: str = '/tmp',
       max_logs_retention_period: datetime.timedelta | None = None,
+      *,
+      wait_for_job_end_seconds: float = 0.0,
   ):
     """Initializes the GoodputMonitor.
 
@@ -916,6 +966,14 @@ class GoodputMonitor:
       cache_dir: Local directory to store the cache files.
       max_logs_retention_period: The maximum retention period for Cloud Logging
         logs. If not set, defaults to 7 days.
+      wait_for_job_end_seconds: How long the final flush may wait, polling about
+        once per second, for the `job_end_time` entry to become readable from
+        Cloud Logging before its last upload. Reads lag writes by a few seconds,
+        so without this wait the final upload usually misses the job end and
+        does not credit the last step. Defaults to 0.0 (no wait). Counts against
+        final_flush_timeout_seconds (leave headroom for the final query and
+        upload); larger values are clamped to it with a warning. Has no effect
+        if skip_final_flush is True.
     """
     if not monitoring_enabled:
       logger.info(
@@ -926,6 +984,17 @@ class GoodputMonitor:
     self._initialized = True
     self._skip_final_flush = skip_final_flush
     self._final_flush_timeout_seconds = final_flush_timeout_seconds
+    if (
+        final_flush_timeout_seconds is not None
+        and wait_for_job_end_seconds > final_flush_timeout_seconds
+    ):
+      logger.warning(
+          'wait_for_job_end_seconds (%s) exceeds final_flush_timeout_seconds'
+          ' (%s); clamping it so the final flush fits within the timeout.',
+          wait_for_job_end_seconds,
+          final_flush_timeout_seconds,
+      )
+      wait_for_job_end_seconds = final_flush_timeout_seconds
 
     # Environment variable overrides for testing
     env_sync_interval = os.environ.get('ML_GOODPUT_GCS_SYNC_INTERVAL_SECONDS')
@@ -999,6 +1068,7 @@ class GoodputMonitor:
         'gcs_sync_interval_seconds': gcs_sync_interval_seconds,
         'cache_dir': cache_dir,
         'max_logs_retention_period': max_logs_retention_period,
+        'wait_for_job_end_seconds': wait_for_job_end_seconds,
     }
 
     # Process management attributes
@@ -1129,6 +1199,7 @@ class GoodputMonitor:
     """Performs final cumulative goodput query and uploads data to Tensorboard & GCM."""
     try:
       calculator = self._goodput_calculator
+      _wait_for_job_end_entry(calculator, self._worker_config, os.getpid())
       job_goodput, job_badput, last_step = calculator.get_job_goodput(
           include_badput_breakdown=self._worker_config[
               'include_badput_breakdown'

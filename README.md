@@ -538,6 +538,10 @@ Create a `GoodputMonitor` object with the following parameters:
   8. `max_logs_retention_period`: The maximum time period (in seconds) to query
         logs for. Defaults to 7 days (`7 * 24 * 60 * 60`). Reducing this window
         prevents query timeouts on large or long-running training runs.
+  9. `wait_for_job_end_seconds`: How long the final flush may wait (polling
+        once per second) for the `job_end_time` entry to become readable from
+        Cloud Logging before its last upload, so the last step is credited.
+        Defaults to `0` (no wait); must fit inside `final_flush_timeout_seconds`.
 
 > **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
    In JAX, for example, the check could be `if jax.process_index() == 0`

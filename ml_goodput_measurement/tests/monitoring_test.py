@@ -514,6 +514,238 @@ class GoodputMonitorTests(absltest.TestCase):
     # Exactly one call: the final flush. No periodic cycle ever ran.
     mock_query_and_upload_once.assert_called_once()
 
+  def _patch_monitoring_clock(self) -> dict:
+    """Replaces time.sleep/time.monotonic with a fake clock for this test."""
+    clock = {'now': 0.0, 'sleeps': []}
+
+    def fake_sleep(seconds):
+      clock['sleeps'].append(seconds)
+      clock['now'] += seconds
+
+    self.enter_context(mock.patch.object(monitoring.time, 'sleep', fake_sleep))
+    self.enter_context(
+        mock.patch.object(monitoring.time, 'monotonic', lambda: clock['now'])
+    )
+    return clock
+
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._query_and_upload_goodput_once'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_gcp_metrics_sender'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_tensorboard_writer'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_goodput_calculator'
+  )
+  def test_goodput_worker_final_flush_waits_until_job_end_entry_is_readable(
+      self,
+      mock_create_calculator,
+      mock_create_writer,
+      mock_create_metrics_sender,
+      mock_query_and_upload_once,
+  ):
+    """The final flush polls (without uploading) about once per second until the job end entry is readable, then uploads exactly once."""
+    mock_create_writer.return_value = MagicMock()
+    calculator = mock_create_calculator.return_value
+    calculator.has_job_end_entry.side_effect = [False, False, True]
+    clock = self._patch_monitoring_clock()
+    termination_event = threading.Event()
+    termination_event.set()  # Loop body never runs.
+    final_flush_event = threading.Event()
+    final_flush_event.set()
+
+    with self.assertLogs(monitoring.logger, level='INFO') as logs:
+      monitoring._goodput_worker(
+          {
+              'job_name': 'test-run',
+              'include_badput_breakdown': False,
+              'upload_interval': 1,
+              'wait_for_job_end_seconds': 2,
+          },
+          termination_event,
+          final_flush_event,
+      )
+
+    self.assertEqual(calculator.get_job_goodput.call_count, 2)
+    self.assertEqual(clock['sleeps'], [1.0, 1.0])
+    mock_query_and_upload_once.assert_called_once()
+    self.assertTrue(any('is readable' in line for line in logs.output))
+
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._query_and_upload_goodput_once'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_gcp_metrics_sender'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_tensorboard_writer'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_goodput_calculator'
+  )
+  def test_goodput_worker_final_flush_stops_waiting_for_job_end_at_budget(
+      self,
+      mock_create_calculator,
+      mock_create_writer,
+      mock_create_metrics_sender,
+      mock_query_and_upload_once,
+  ):
+    mock_create_writer.return_value = MagicMock()
+    calculator = mock_create_calculator.return_value
+    calculator.has_job_end_entry.return_value = False
+    clock = self._patch_monitoring_clock()
+    termination_event = threading.Event()
+    termination_event.set()  # Loop body never runs.
+    final_flush_event = threading.Event()
+    final_flush_event.set()
+
+    with self.assertLogs(monitoring.logger, level='INFO') as logs:
+      monitoring._goodput_worker(
+          {
+              'job_name': 'test-run',
+              'include_badput_breakdown': False,
+              'upload_interval': 1,
+              'wait_for_job_end_seconds': 2.5,
+          },
+          termination_event,
+          final_flush_event,
+      )
+
+    # The last poll is shortened to what is left of the budget.
+    self.assertEqual(clock['sleeps'], [1.0, 1.0, 0.5])
+    self.assertEqual(calculator.get_job_goodput.call_count, 3)
+    mock_query_and_upload_once.assert_called_once()
+    self.assertTrue(any('not readable' in line for line in logs.output))
+
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._query_and_upload_goodput_once'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_gcp_metrics_sender'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_tensorboard_writer'
+  )
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_goodput_calculator'
+  )
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_goodput_worker_final_flush_does_not_wait_for_job_end_by_default(
+      self,
+      mock_logger_client,
+      mock_summary_writer,
+      mock_create_calculator,
+      mock_create_writer,
+      mock_create_metrics_sender,
+      mock_query_and_upload_once,
+  ):
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+    mock_create_writer.return_value = MagicMock()
+    goodput_monitor = monitoring.GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+    )
+    self.assertEqual(
+        goodput_monitor._worker_config['wait_for_job_end_seconds'], 0.0
+    )
+    calculator = mock_create_calculator.return_value
+    termination_event = threading.Event()
+    termination_event.set()  # Loop body never runs.
+    final_flush_event = threading.Event()
+    final_flush_event.set()
+
+    with mock.patch.object(monitoring.time, 'sleep') as mock_sleep:
+      monitoring._goodput_worker(
+          goodput_monitor._worker_config, termination_event, final_flush_event
+      )
+
+    # Exactly one final cycle, no polling at all.
+    calculator.has_job_end_entry.assert_not_called()
+    calculator.get_job_goodput.assert_not_called()
+    mock_sleep.assert_not_called()
+    mock_query_and_upload_once.assert_called_once()
+
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_wait_for_job_end_seconds_is_clamped_to_final_flush_timeout(
+      self, mock_logger_client, mock_summary_writer
+  ):
+    """The wait must fit inside final_flush_timeout_seconds, which bounds the worker join (and the no-worker fallback) covering the whole final flush."""
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+
+    with self.assertLogs(monitoring.logger, level='WARNING') as logs:
+      goodput_monitor = monitoring.GoodputMonitor(
+          self.job_name,
+          self.logger_name,
+          self.tensorboard_dir,
+          upload_interval=_TEST_UPLOAD_INTERVAL,
+          monitoring_enabled=True,
+          final_flush_timeout_seconds=5,
+          wait_for_job_end_seconds=30,
+      )
+    self.assertEqual(
+        goodput_monitor._worker_config['wait_for_job_end_seconds'], 5
+    )
+    self.assertLen(logs.output, 1)
+    self.assertIn('clamping', logs.output[0])
+
+    # With no final flush timeout there is nothing to clamp to.
+    goodput_monitor = monitoring.GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        final_flush_timeout_seconds=None,
+        wait_for_job_end_seconds=30,
+    )
+    self.assertEqual(
+        goodput_monitor._worker_config['wait_for_job_end_seconds'], 30
+    )
+
+  @patch(
+      'cloud_goodput.ml_goodput_measurement.src.monitoring._create_tensorboard_writer'
+  )
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_final_goodput_query_and_upload_waits_for_job_end_entry(
+      self, mock_logger_client, mock_summary_writer, mock_create_writer
+  ):
+    """The no-worker fallback applies the same bounded wait before its query."""
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+    mock_create_writer.return_value = MagicMock()
+    goodput_monitor = monitoring.GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        wait_for_job_end_seconds=2,
+    )
+    calculator = MagicMock()
+    calculator.has_job_end_entry.side_effect = [False, True]
+    calculator.get_job_goodput.return_value = (50.0, {}, 3)
+    goodput_monitor._goodput_calculator = calculator
+    clock = self._patch_monitoring_clock()
+
+    goodput_monitor._final_goodput_query_and_upload()
+
+    # One poll while waiting, then the final query itself.
+    self.assertEqual(calculator.get_job_goodput.call_count, 2)
+    self.assertEqual(clock['sleeps'], [1.0])
+    summary_writer = mock_create_writer.return_value.__enter__.return_value
+    summary_writer.add_scalar.assert_called_once()
+
 
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'

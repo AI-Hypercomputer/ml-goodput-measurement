@@ -2130,6 +2130,33 @@ class BadputTest(googletest.TestCase):
           delta=0.1,
       )
 
+  def test_get_step_deviation_sub_second_steps(self):
+    """Sub-second steps only yield step deviations with a lower min_step_time."""
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    step_start_time = _TEST_STEP_START_TIME
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += datetime.timedelta(milliseconds=100)
+    self.goodput_recorder.record_job_end_time(step_start_time)
+
+    # The default 1 s floor drops every step, so no ideal step time exists.
+    with self.assertRaisesRegex(ValueError, 'No ideal step time available'):
+      self.goodput_calculator.get_step_deviation()
+
+    goodput_calculator = goodput.GoodputCalculator(
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.create_tempdir().full_path,
+        min_step_time=0.0,
+    )
+    step_deviations = goodput_calculator.get_step_deviation()
+    self.assertLen(step_deviations, _TEST_TOTAL_STEPS - 1)
+    for deviation in step_deviations.values():
+      self.assertAlmostEqual(deviation, 0.0, places=3)
+    step_info = goodput_calculator._goodput_cache.get_step_info()
+    self.assertAlmostEqual(step_info.ideal_step_time, 0.1, places=3)
+
   def test_badput_calculator_custom_sync_badput(self):
     """Test function to validate unknown badput bucket."""
 

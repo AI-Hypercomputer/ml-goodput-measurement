@@ -54,7 +54,8 @@ def _query_and_upload_goodput_once(
   """
   try:
     job_goodput, job_badput, last_step = calculator.get_job_goodput(
-        include_badput_breakdown=config['include_badput_breakdown']
+        include_badput_breakdown=config['include_badput_breakdown'],
+        configured_ideal_step_time=config['configured_ideal_step_time'],
     )
   except Exception as e:  # pylint: disable=broad-exception-caught
     logger.warning(
@@ -364,6 +365,7 @@ def _create_goodput_calculator(config: dict) -> GoodputCalculator:
       gcs_path=config.get('tensorboard_dir'),
       cache_dir=config.get('cache_dir', '/tmp'),
       max_logs_retention_period=config.get('max_logs_retention_period'),
+      min_step_time=config.get('min_step_time', 1.0),
   )
 
 
@@ -875,6 +877,8 @@ class GoodputMonitor:
       gcs_sync_interval_seconds: int = 3600,
       cache_dir: str = '/tmp',
       max_logs_retention_period: datetime.timedelta | None = None,
+      *,
+      min_step_time: float = 1.0,
   ):
     """Initializes the GoodputMonitor.
 
@@ -916,6 +920,9 @@ class GoodputMonitor:
       cache_dir: Local directory to store the cache files.
       max_logs_retention_period: The maximum retention period for Cloud Logging
         logs. If not set, defaults to 7 days.
+      min_step_time: Shortest step time, in seconds, taken into account when
+        computing the ideal step time. Pass 0.0 for workloads with sub-second
+        steps; ignored if configured_ideal_step_time is set.
     """
     if not monitoring_enabled:
       logger.info(
@@ -956,6 +963,7 @@ class GoodputMonitor:
         gcs_path=tensorboard_dir,
         cache_dir=cache_dir,
         max_logs_retention_period=max_logs_retention_period,
+        min_step_time=min_step_time,
     )
     tensorboard_path = os.path.join(tensorboard_dir, _TENSORBOARD_GCS_SUBDIR)
     self._writer = writer.SummaryWriter(tensorboard_path)
@@ -992,6 +1000,7 @@ class GoodputMonitor:
         'include_badput_breakdown': include_badput_breakdown,
         'include_step_deviation': include_step_deviation,
         'configured_ideal_step_time': configured_ideal_step_time,
+        'min_step_time': min_step_time,
         'step_deviation_interval_seconds': step_deviation_interval_seconds,
         'gcp_options': gcp_options,
         'rolling_windows': [],
@@ -1132,7 +1141,10 @@ class GoodputMonitor:
       job_goodput, job_badput, last_step = calculator.get_job_goodput(
           include_badput_breakdown=self._worker_config[
               'include_badput_breakdown'
-          ]
+          ],
+          configured_ideal_step_time=self._worker_config[
+              'configured_ideal_step_time'
+          ],
       )
       with _create_tensorboard_writer(self._worker_config) as summary_writer:
         _upload_goodput_metrics_to_tensorboard(

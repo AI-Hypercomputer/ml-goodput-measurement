@@ -279,10 +279,27 @@ def compute_baseline_step_time(step_times: list[float]) -> float:
   return sorted(step_times)[(len(step_times) - 1) // 2]
 
 
-def compute_ideal_step_time(step_times: list[float]) -> Optional[float]:
-  """Helper function to compute the ideal step time."""
-  # Filter out step times that may be less than 1 second.
-  step_times = [step_time for step_time in step_times if step_time >= 1.0]
+def compute_ideal_step_time(
+    step_times: list[float], min_step_time: float = 1.0
+) -> Optional[float]:
+  """Computes the ideal step time from the observed step times.
+
+  Step times below `min_step_time` are ignored so that spuriously short step
+  gaps, such as host dispatch gaps or duplicated step timestamps, do not skew
+  the result; pass 0.0 to disable this floor for workloads with sub-second
+  steps. The result is the mean of the remaining step times after dropping
+  outliers above the median + 3 * MAD.
+
+  Args:
+    step_times: Step durations in seconds.
+    min_step_time: Shortest step duration, in seconds, to take into account.
+
+  Returns:
+    The ideal step time in seconds, or None if no step time qualifies.
+  """
+  step_times = [
+      step_time for step_time in step_times if step_time >= min_step_time
+  ]
   if not step_times:
     return None
   # Compute the median absolute deviation (MAD) and median of the step times

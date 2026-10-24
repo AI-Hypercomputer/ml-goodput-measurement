@@ -538,6 +538,11 @@ Create a `GoodputMonitor` object with the following parameters:
   8. `max_logs_retention_period`: The maximum time period (in seconds) to query
         logs for. Defaults to 7 days (`7 * 24 * 60 * 60`). Reducing this window
         prevents query timeouts on large or long-running training runs.
+  9. `min_step_time`: The shortest step time (in seconds) taken into account
+        when computing the ideal step time. Defaults to `1.0`, which ignores
+        spuriously short step gaps; set it to `0.0` for workloads with
+        sub-second steps, otherwise no ideal step time or step deviation is
+        reported for them.
 
 > **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
    In JAX, for example, the check could be `if jax.process_index() == 0`

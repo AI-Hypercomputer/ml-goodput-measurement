@@ -619,6 +619,8 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       max_logs_retention_period: Optional[datetime.timedelta] = None,
       gcs_path: Optional[str] = None,
       cache_dir: str = '/tmp',
+      *,
+      min_step_time: float = 1.0,
   ):
     """GoodputCalculator constructor.
 
@@ -631,9 +633,13 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         Logging entries.
       gcs_path: Optional GCS path to sync the cache to.
       cache_dir: Local directory to store the cache files.
+      min_step_time: Shortest step time, in seconds, taken into account when
+        computing the ideal step time. Pass 0.0 for workloads with sub-second
+        steps.
     """
     self.job_name = job_name
     self.using_pathways = using_pathways
+    self._min_step_time = min_step_time
     self._interval_cache = []
     self._last_interval_entry_info: Optional[
         tuple[datetime.datetime, str]
@@ -2245,7 +2251,9 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     ideal_step_time = (
         configured_ideal_step_time
         if configured_ideal_step_time is not None
-        else compute_ideal_step_time(list(step_times.values()))
+        else compute_ideal_step_time(
+            list(step_times.values()), min_step_time=self._min_step_time
+        )
     )
     if not ideal_step_time:
       raise ValueError(

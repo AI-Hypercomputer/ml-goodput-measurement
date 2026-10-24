@@ -907,6 +907,59 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         ).values()
     )
 
+  @staticmethod
+  def _extract_restore_intervals(
+      entries: list[Any],
+  ) -> list[tuple[float, float]]:
+    """Extracts `(start_time, end_time)` intervals of checkpoint restores.
+
+    Groups restore entries by `(step, is_local)` and averages the start time
+    and duration across worker occurrences to match
+    `CheckpointBadputCalculator`. Entries without a
+    `checkpoint_manager_start_time` cannot be placed in time and are skipped.
+
+    Args:
+      entries: A list of Cloud Logging entry payloads.
+
+    Returns:
+      A list of `(restore_start_time, restore_end_time)` tuples.
+    """
+    grouped_restores: dict[tuple[str, bool], list[tuple[float, float]]] = {}
+    for entry in entries:
+      if not isinstance(entry, dict):
+        continue
+      if entry.get('event_type') not in ('restore', 'emergency_restore'):
+        continue
+      restore_start_time = entry.get('checkpoint_manager_start_time')
+      restore_duration = float(
+          entry.get('checkpoint_manager_duration_secs') or 0.0
+      )
+      if restore_start_time is None or restore_duration <= 0.0:
+        continue
+      is_local = not str(entry.get('directory', '')).startswith('gs://')
+      restore_key = (str(entry.get('step')), is_local)
+      grouped_restores.setdefault(restore_key, []).append(
+          (float(restore_start_time), restore_duration)
+      )
+    restore_intervals = []
+    for items in grouped_restores.values():
+      avg_start_time = sum(start for start, _ in items) / len(items)
+      avg_duration = sum(duration for _, duration in items) / len(items)
+      restore_intervals.append((avg_start_time, avg_start_time + avg_duration))
+    return restore_intervals
+
+  @staticmethod
+  def _total_overlap(
+      intervals: list[tuple[float, float]],
+      other_intervals: list[tuple[float, float]],
+  ) -> float:
+    """Returns the total seconds of overlap between two lists of intervals."""
+    total = 0.0
+    for start, end in intervals:
+      for other_start, other_end in other_intervals:
+        total += max(0.0, min(end, other_end) - max(start, other_start))
+    return total
+
   def _compute_segment_startup_overhead(
       self, step_times: list[float], min_step: int
   ) -> float:
@@ -1331,6 +1384,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     job_end_time = None
     tpu_init_start_time = None
     training_prep_start_time = None
+    training_prep_intervals: list[tuple[float, float]] = []
     data_loading_start_time = None
     tpu_initialization_badput = 0.0
     training_prep_badput = 0.0
@@ -1571,6 +1625,9 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           _TRAINING_PREPARATION_END_TIME in payload
           and training_prep_start_time is not None
       ):
+        training_prep_intervals.append(
+            (training_prep_start_time, payload[_TRAINING_PREPARATION_END_TIME])
+        )
         training_prep_badput += (
             payload[_TRAINING_PREPARATION_END_TIME] - training_prep_start_time
         )
@@ -1616,12 +1673,23 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     checkpoint_manager_restore_badput = (
         checkpoint_manager_restore_stats.total_checkpoint_manager_time
     )
+    # A checkpoint restore performed inside a training preparation interval is
+    # already counted as restore badput, so it leaves the training prep bucket.
+    restore_in_training_prep = min(
+        self._total_overlap(
+            training_prep_intervals,
+            self._extract_restore_intervals(entries_to_process),
+        ),
+        checkpoint_manager_restore_badput,
+    )
 
     # Populate some Badput buckets in total_unproductive_time.
     total_unproductive_time[BadputType.TPU_INITIALIZATION] = (
         tpu_initialization_badput
     )
-    total_unproductive_time[BadputType.TRAINING_PREP] = training_prep_badput
+    total_unproductive_time[BadputType.TRAINING_PREP] = max(
+        0.0, training_prep_badput - restore_in_training_prep
+    )
 
     # Populate async data loading badput.
     async_data_loading_badput = (

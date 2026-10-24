@@ -15,6 +15,7 @@ from cloud_goodput.ml_goodput_measurement.src import checkpoint_badput_calculato
 from cloud_goodput.ml_goodput_measurement.src import goodput_cache
 from cloud_goodput.ml_goodput_measurement.src import goodput_exclusion
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
+from scipy import stats
 
 
 get_timestamp_from_log_entry = goodput_utils.get_timestamp_from_log_entry
@@ -914,9 +915,13 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
 
     Uses the current segment's step times to establish a steady-state baseline
     when `len(step_times) > 1`, or falls back to prior segments' historical step
-    times when a post-restart segment has only 1 completed step. Also updates
-    `self._historical_step_times` for the compilation step to exclude the
-    startup overhead.
+    times when a post-restart segment has only 1 completed step. Within the
+    first `_STARTUP_COMPILATION_WINDOW` steps, every step exceeding the baseline
+    by more than 3 MADs is charged, as is the slowest step whenever it exceeds
+    the baseline, so backends that compile or warm up over several leading
+    steps (e.g. PyTorch/XLA) are fully accounted for. Also updates
+    `self._historical_step_times` for each charged step to exclude its startup
+    overhead.
 
     Args:
       step_times: List of completed step durations (with custom sync and
@@ -931,8 +936,6 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     if steps_in_segment == 0:
       return 0.0
 
-    # Attribute the maximum excess step time in the startup window to program
-    # startup.
     startup_window = min(_STARTUP_COMPILATION_WINDOW, steps_in_segment)
     prior_step_times = [
         duration
@@ -940,32 +943,38 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         if step_idx < min_step or step_idx >= min_step + steps_in_segment
     ]
     if steps_in_segment > 1:
-      baseline_step_time = compute_baseline_step_time(step_times)
+      reference_step_times = step_times
     elif prior_step_times:
       # When a post-restart segment has only 1 completed step before another
       # disruption, use prior segments' historical step times as the baseline so
       # compilation overhead on that single step is not miscounted as goodput.
-      baseline_step_time = compute_baseline_step_time(prior_step_times)
+      reference_step_times = prior_step_times
     else:
-      baseline_step_time = step_times[0]
+      return 0.0
 
-    compilation_step_offset = max(
+    baseline_step_time = compute_baseline_step_time(reference_step_times)
+    anomaly_threshold = baseline_step_time + 3 * float(
+        stats.median_abs_deviation(reference_step_times)
+    )
+    slowest_step_offset = max(
         range(startup_window), key=lambda i: step_times[i]
     )
-    has_reference_baseline = steps_in_segment > 1 or bool(prior_step_times)
-    startup_extra_time = (
-        max(0.0, step_times[compilation_step_offset] - baseline_step_time)
-        if has_reference_baseline
-        else 0.0
-    )
 
-    # Adjust the compilation step's historical time to exclude startup overhead.
-    compilation_step = min_step + compilation_step_offset
-    if (
-        startup_extra_time > 0.0
-        and compilation_step in self._historical_step_times
-    ):
-      self._historical_step_times[compilation_step] -= startup_extra_time
+    # Attribute the excess time of every anomalous step in the startup window,
+    # and always of the slowest one, to program startup.
+    startup_extra_time = 0.0
+    for step_offset in range(startup_window):
+      step_extra_time = step_times[step_offset] - baseline_step_time
+      if step_extra_time <= 0.0 or (
+          step_offset != slowest_step_offset
+          and step_times[step_offset] <= anomaly_threshold
+      ):
+        continue
+      startup_extra_time += step_extra_time
+      # Adjust the step's historical time to exclude its startup overhead.
+      step = min_step + step_offset
+      if step in self._historical_step_times:
+        self._historical_step_times[step] -= step_extra_time
 
     return startup_extra_time
 

@@ -1398,6 +1398,135 @@ class BadputTest(googletest.TestCase):
     )
     self.assertAlmostEqual(interval_goodput, expected_goodput, delta=0.1)
 
+  def test_badput_calculator_program_startup_multiple_slow_steps(self):
+    """Validates startup badput when several leading steps are slow."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 19, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Steps 0 and 1 both carry compilation/warm-up overhead, as on asynchronous
+    # backends such as PyTorch/XLA.
+    step_extra_times = {
+        0: datetime.timedelta(seconds=20),
+        1: datetime.timedelta(seconds=8),
+    }
+    total_steps = 10
+    step_start_time = job_start_time
+    for step in range(total_steps):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME + step_extra_times.get(
+          step, datetime.timedelta()
+      )
+    job_end_time = step_start_time
+    self.goodput_recorder.record_job_end_time(job_end_time)
+    total_time = (job_end_time - job_start_time).total_seconds()
+
+    computed_goodput, computed_badput_breakdown, _ = (
+        self.goodput_calculator.get_job_goodput(include_badput_breakdown=True)
+    )
+
+    expected_startup_secs = sum(
+        extra.total_seconds() for extra in step_extra_times.values()
+    )
+    expected_productive_secs = (_TEST_STEP_TIME * total_steps).total_seconds()
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.PROGRAM_STARTUP],
+        expected_startup_secs / total_time * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        computed_goodput, expected_productive_secs / total_time * 100, delta=0.1
+    )
+    total_badput = sum(
+        sum(value.values()) if isinstance(value, dict) else value
+        for badput_type, value in computed_badput_breakdown.items()
+        if badput_type != BadputType.DATA_LOADING_ASYNC
+    )
+    self.assertAlmostEqual(computed_goodput + total_badput, 100.0, delta=0.1)
+    for step in step_extra_times:
+      self.assertAlmostEqual(
+          self.goodput_calculator._historical_step_times[step],
+          _TEST_STEP_TIME.total_seconds(),
+          delta=0.01,
+      )
+
+  def _compute_startup_overhead(
+      self,
+      step_times: list[float],
+      min_step: int = 0,
+      prior_step_times: Optional[dict[int, float]] = None,
+  ) -> float:
+    """Seeds `_historical_step_times` like the caller and computes overhead."""
+    historical_step_times = dict(prior_step_times or {})
+    historical_step_times.update(
+        {min_step + i: step_time for i, step_time in enumerate(step_times)}
+    )
+    self.goodput_calculator._historical_step_times = historical_step_times
+    return self.goodput_calculator._compute_segment_startup_overhead(
+        step_times, min_step
+    )
+
+  def test_compute_segment_startup_overhead_charges_all_anomalous_steps(self):
+    """Validates every anomalous step in the startup window is charged."""
+    step_times = [30.0, 12.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    startup_extra_time = self._compute_startup_overhead(step_times, min_step=10)
+    self.assertAlmostEqual(startup_extra_time, 40.0)
+    historical_step_times = self.goodput_calculator._historical_step_times
+    self.assertAlmostEqual(historical_step_times[10], 1.0)
+    self.assertAlmostEqual(historical_step_times[11], 1.0)
+    self.assertAlmostEqual(historical_step_times[12], 1.0)
+
+  def test_compute_segment_startup_overhead_skips_non_anomalous_steps(self):
+    """Validates steps above the baseline but within 3 MADs are not charged."""
+    # Baseline (lower median) is 4.0 and MAD is 1.0, so only 30.0 is anomalous.
+    step_times = [30.0, 4.0, 3.0, 5.0, 3.0, 4.0, 3.0, 5.0, 3.0]
+    startup_extra_time = self._compute_startup_overhead(step_times)
+    self.assertAlmostEqual(startup_extra_time, 26.0)
+    historical_step_times = self.goodput_calculator._historical_step_times
+    self.assertAlmostEqual(historical_step_times[0], 4.0)
+    self.assertAlmostEqual(historical_step_times[3], 5.0)
+
+  def test_compute_segment_startup_overhead_always_charges_slowest_step(self):
+    """Validates the slowest step in the window is always charged."""
+    self.assertAlmostEqual(
+        self._compute_startup_overhead([20.0, 1.0, 1.0, 1.0, 1.0, 1.0]), 19.0
+    )
+    self.assertAlmostEqual(
+        self.goodput_calculator._historical_step_times[0], 1.0
+    )
+    # Baseline is 3.0 and MAD is 1.0, so 5.0 is within 3 MADs but still charged.
+    self.assertAlmostEqual(self._compute_startup_overhead([5.0, 3.0]), 2.0)
+    self.assertAlmostEqual(
+        self.goodput_calculator._historical_step_times[0], 3.0
+    )
+
+  def test_compute_segment_startup_overhead_ignores_steps_after_window(self):
+    """Validates slow steps beyond the startup window are not charged."""
+    step_times = [1.0] * 5 + [30.0] + [1.0] * 4
+    self.assertAlmostEqual(self._compute_startup_overhead(step_times), 0.0)
+    self.assertAlmostEqual(
+        self.goodput_calculator._historical_step_times[5], 30.0
+    )
+
+  def test_compute_segment_startup_overhead_single_step_segment(self):
+    """Validates a 1-step segment is charged against prior history only."""
+    prior_step_times = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0}
+    startup_extra_time = self._compute_startup_overhead(
+        [25.0], min_step=10, prior_step_times=prior_step_times
+    )
+    self.assertAlmostEqual(startup_extra_time, 24.0)
+    self.assertAlmostEqual(
+        self.goodput_calculator._historical_step_times[10], 1.0
+    )
+    # Without prior history there is no reference baseline.
+    self.assertAlmostEqual(
+        self._compute_startup_overhead([25.0], min_step=10), 0.0
+    )
+    self.assertAlmostEqual(
+        self.goodput_calculator._historical_step_times[10], 25.0
+    )
+
   def test_badput_calculator_wasted_progress_and_disruptions(self):
     """Validate computation of badput due to wasted progress and disruptions."""
 

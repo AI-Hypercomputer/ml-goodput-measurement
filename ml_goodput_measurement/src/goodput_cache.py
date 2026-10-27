@@ -56,6 +56,10 @@ class GoodputCache:
 
     # Try to restore from GCS on startup (Cold Start Recovery)
     self._restore_from_gcs()
+    # Resume from a local cache left by an earlier process (e.g. a restart on
+    # the same host); without the cursor, new entries would never be fetched.
+    self._initialize_times_from_file()
+    self._initialize_metadata_from_file()
 
   def _restore_from_gcs(self):
     """Restores the timeline and metadata files from GCS if they exist."""

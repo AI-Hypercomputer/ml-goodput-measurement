@@ -79,6 +79,38 @@ class GoodputCacheTest(googletest.TestCase):
     self.assertEqual(self.goodput_cache.get_cached_entries(), [])
     self.assertIsNone(self.goodput_cache._goodput_info)
 
+  def test_new_cache_resumes_from_local_files(self):
+    cache_dir = self.create_tempdir().full_path
+    cache = goodput_cache.GoodputCache(
+        job_name=self.job_name, cache_dir=cache_dir
+    )
+    last_entry_ts = datetime.datetime(2025, 1, 1, 0, 0, 2, tzinfo=datetime.timezone.utc)
+    cache.update_cached_entries(
+        [
+            {'job_start_time': 1.0, 'job_name': self.job_name},
+            {'job_end_time': 2.0, 'job_name': self.job_name},
+        ],
+        (last_entry_ts, 'entry-2'),
+    )
+
+    resumed = goodput_cache.GoodputCache(
+        job_name=self.job_name, cache_dir=cache_dir
+    )
+
+    self.assertEqual(resumed.get_job_start_time().timestamp(), 1.0)
+    self.assertEqual(resumed.get_job_end_time().timestamp(), 2.0)
+    self.assertEqual(resumed.get_last_entry_info(), (last_entry_ts, 'entry-2'))
+    self.assertLen(resumed.get_cached_entries(), 2)
+
+  def test_new_cache_without_local_files_starts_empty(self):
+    cache = goodput_cache.GoodputCache(
+        job_name=self.job_name, cache_dir=self.create_tempdir().full_path
+    )
+    self.assertTrue(cache.is_cache_empty())
+    self.assertIsNone(cache.get_job_start_time())
+    self.assertIsNone(cache.get_job_end_time())
+    self.assertIsNone(cache.get_last_entry_info())
+
   def test_is_cache_empty(self):
     self.assertTrue(self.goodput_cache.is_cache_empty())
     self.goodput_cache.update_cached_entries(

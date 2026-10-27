@@ -96,6 +96,26 @@ class GoodputUtilsTest(absltest.TestCase):
         2.0,
     )
 
+  def test_compute_ideal_step_time_min_step_time(self):
+    """Steps shorter than min_step_time (1 s by default) are ignored."""
+    sub_second_steps = [0.10, 0.11, 0.12, 0.10, 0.11, 0.9]
+    self.assertIsNone(goodput_utils.compute_ideal_step_time(sub_second_steps))
+    # With the floor disabled, the median + 3 * MAD filter drops the 0.9 s step.
+    self.assertAlmostEqual(
+        goodput_utils.compute_ideal_step_time(
+            sub_second_steps, min_step_time=0.0
+        ),
+        0.108,
+    )
+    steps = [0.5, 2.0, 2.0, 2.0, 2.0]
+    self.assertEqual(goodput_utils.compute_ideal_step_time(steps), 2.0)
+    self.assertEqual(
+        goodput_utils.compute_ideal_step_time(steps, min_step_time=1.0), 2.0
+    )
+    self.assertAlmostEqual(
+        goodput_utils.compute_ideal_step_time(steps, min_step_time=0.0), 1.7
+    )
+
 
 if __name__ == '__main__':
   absltest.main()

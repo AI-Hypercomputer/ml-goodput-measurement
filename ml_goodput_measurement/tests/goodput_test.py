@@ -1912,6 +1912,194 @@ class BadputTest(googletest.TestCase):
         expect_badput_due_to_checkpointing_restore,
     )
 
+  def _record_training_prep_and_steps(self, job_start_time):
+    """Records a 20s training preparation, a 2s gap and five 3s steps (37s)."""
+    self.goodput_recorder.record_job_start_time(job_start_time)
+    self.goodput_recorder.record_training_preparation_start_time(job_start_time)
+    self.goodput_recorder.record_training_preparation_end_time(
+        job_start_time + datetime.timedelta(seconds=20)
+    )
+    step_start_time = job_start_time + datetime.timedelta(seconds=22)
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+    self.goodput_recorder.record_job_end_time(step_start_time)
+    return (step_start_time - job_start_time).total_seconds()
+
+  def _write_restore_entry(
+      self, start_time, duration_secs, include_manager_start_time=True
+  ):
+    """Writes a persistent checkpoint restore entry for step 0."""
+    restore_stats = MockRestoreStepStatistics(
+        step=0,
+        event_type='restore',
+        directory='gs://bucket/path',
+        checkpointer_start_time=start_time.timestamp(),
+        checkpointer_duration_secs=duration_secs,
+        checkpoint_manager_start_time=(
+            start_time.timestamp() if include_manager_start_time else None
+        ),
+        checkpoint_manager_duration_secs=duration_secs,
+    )
+    self.mock_cloud_logger.write_cloud_logging_entry(asdict(restore_stats))
+
+  def _get_badput_breakdown_total(self, goodput_pct, breakdown):
+    """Sums Goodput and all blocking badput buckets (as percentages)."""
+    total = goodput_pct
+    for badput_type, value in breakdown.items():
+      if badput_type == BadputType.DATA_LOADING_ASYNC:
+        continue
+      total += sum(value.values()) if isinstance(value, dict) else value
+    return total
+
+  def test_checkpoint_restore_inside_training_prep_not_double_counted(self):
+    """Validates restore time inside training preparation is counted once."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 19, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    total_time = self._record_training_prep_and_steps(job_start_time)
+    # 8s restore fully inside the 20s training preparation interval.
+    self._write_restore_entry(
+        job_start_time + datetime.timedelta(seconds=5), 8.0
+    )
+
+    goodput_pct, breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.TRAINING_PREP],
+        (12.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        (8.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        self._get_badput_breakdown_total(goodput_pct, breakdown),
+        100.0,
+        delta=0.1,
+    )
+
+  def test_checkpoint_restore_outside_training_prep_unchanged(self):
+    """Validates a restore after training preparation leaves both buckets."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 19, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    total_time = self._record_training_prep_and_steps(job_start_time)
+    # 2s restore in the gap between training preparation and Step 0.
+    self._write_restore_entry(
+        job_start_time + datetime.timedelta(seconds=20), 2.0
+    )
+
+    goodput_pct, breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.TRAINING_PREP],
+        (20.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        (2.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        self._get_badput_breakdown_total(goodput_pct, breakdown),
+        100.0,
+        delta=0.1,
+    )
+
+  def test_checkpoint_restore_partially_inside_training_prep(self):
+    """Validates only the overlapping restore time leaves training prep."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 19, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    total_time = self._record_training_prep_and_steps(job_start_time)
+    # 6s restore: 4s inside training preparation, 2s in the gap after it.
+    self._write_restore_entry(
+        job_start_time + datetime.timedelta(seconds=16), 6.0
+    )
+
+    goodput_pct, breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.TRAINING_PREP],
+        (16.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        (6.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        self._get_badput_breakdown_total(goodput_pct, breakdown),
+        100.0,
+        delta=0.1,
+    )
+
+  def test_checkpoint_restore_without_start_time_keeps_training_prep(self):
+    """Validates a restore with no start time is not subtracted from prep."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 19, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    total_time = self._record_training_prep_and_steps(job_start_time)
+    self._write_restore_entry(
+        job_start_time + datetime.timedelta(seconds=5),
+        8.0,
+        include_manager_start_time=False,
+    )
+
+    _, breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.TRAINING_PREP],
+        (20.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        (8.0 / total_time) * 100,
+        delta=0.1,
+    )
+
+  def test_checkpoint_restore_multi_worker_inside_training_prep(self):
+    """Validates a restore logged by two workers is subtracted from prep once."""
+    job_start_time = datetime.datetime(
+        2026, 8, 27, 19, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    total_time = self._record_training_prep_and_steps(job_start_time)
+    # Two workers log the same Step 0 restore (6s and 10s, averaged to 8s).
+    for worker_restore_duration in (6.0, 10.0):
+      self._write_restore_entry(
+          job_start_time + datetime.timedelta(seconds=5),
+          worker_restore_duration,
+      )
+
+    goodput_pct, breakdown, _ = self.goodput_calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        (8.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        breakdown[BadputType.TRAINING_PREP],
+        (12.0 / total_time) * 100,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        self._get_badput_breakdown_total(goodput_pct, breakdown),
+        100.0,
+        delta=0.1,
+    )
+
   def test_goodput_badput_with_interval_query(self):
     """Validate computation of goodput and badput with interval query."""
 

@@ -1,6 +1,8 @@
 """Tests for the _CloudLogger class."""
 import datetime
 import logging
+import threading
+import time
 from unittest import mock
 
 from absl.testing import absltest
@@ -187,6 +189,57 @@ class CloudLoggerAsyncWritesTest(absltest.TestCase):
       mock_flush.assert_called_once()
 
   @mock.patch('google.cloud.logging.Client')
+  def test_flush_with_timeout_returns_true_when_handler_completes(
+      self, mock_client_cls
+  ):
+    mock_client_cls.return_value.project = 'p'
+    logger = _CloudLogger(self.job_name, self.log_name)
+    with mock.patch.object(logger._async_handler, 'flush') as mock_flush:
+      self.assertTrue(logger.flush(timeout_s=5))
+      mock_flush.assert_called_once()
+
+  @mock.patch('google.cloud.logging.Client')
+  def test_flush_with_timeout_gives_up_when_handler_blocks(
+      self, mock_client_cls
+  ):
+    mock_client_cls.return_value.project = 'p'
+    logger = _CloudLogger(self.job_name, self.log_name)
+    release = threading.Event()
+    with mock.patch.object(
+        logger._async_handler, 'flush', side_effect=release.wait
+    ):
+      with self.assertLogs(goodput.logger, level='WARNING') as logs:
+        start_time = time.monotonic()
+        self.assertFalse(logger.flush(timeout_s=0.05))
+        elapsed = time.monotonic() - start_time
+    release.set()
+    self.assertLess(elapsed, 1)
+    self.assertLen(logs.output, 1)
+    self.assertIn('0.05', logs.output[0])
+
+  @mock.patch('google.cloud.logging.Client')
+  def test_flush_without_timeout_blocks_until_handler_completes(
+      self, mock_client_cls
+  ):
+    mock_client_cls.return_value.project = 'p'
+    logger = _CloudLogger(self.job_name, self.log_name)
+    release = threading.Event()
+    results = []
+    with mock.patch.object(
+        logger._async_handler, 'flush', side_effect=release.wait
+    ):
+      flush_thread = threading.Thread(
+          target=lambda: results.append(logger.flush())
+      )
+      flush_thread.start()
+      flush_thread.join(timeout=0.2)
+      self.assertTrue(flush_thread.is_alive())
+      release.set()
+      flush_thread.join(timeout=5)
+    self.assertFalse(flush_thread.is_alive())
+    self.assertEqual(results, [True])
+
+  @mock.patch('google.cloud.logging.Client')
   def test_two_instances_same_log_name_do_not_share_handlers(
       self, mock_client_cls
   ):
@@ -228,13 +281,26 @@ class GoodputRecorderFlushTest(absltest.TestCase):
       recorder.flush()
       mock_flush.assert_called_once()
 
+  @mock.patch('google.cloud.logging.Client')
+  def test_flush_forwards_timeout_and_result(self, mock_client_cls):
+    mock_client_cls.return_value.project = 'p'
+    recorder = goodput.GoodputRecorder(
+        'test-job', 'test-log', logging_enabled=True
+    )
+    with mock.patch.object(
+        recorder._cloud_logger, 'flush', return_value=False
+    ) as mock_flush:
+      self.assertFalse(recorder.flush(timeout_s=2.5))
+      mock_flush.assert_called_once_with(timeout_s=2.5)
+
   def test_flush_is_noop_when_logging_disabled(self):
     recorder = goodput.GoodputRecorder(
         'test-job', 'test-log', logging_enabled=False
     )
     self.assertIsNone(recorder._cloud_logger)
-    # Should not raise.
-    recorder.flush()
+    # Nothing to drain, so it reports success without raising.
+    self.assertTrue(recorder.flush())
+    self.assertTrue(recorder.flush(timeout_s=0.01))
 
 
 if __name__ == '__main__':

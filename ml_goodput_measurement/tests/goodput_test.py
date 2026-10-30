@@ -3001,5 +3001,44 @@ class GoodputExclusionIntegrationTest(googletest.TestCase):
     )
 
 
+class CustomSyncLookupTest(googletest.TestCase):
+  """Tests the per-window lookup of custom badput intervals."""
+
+  def test_lookup_returns_intervals_inside_window_in_original_order(self):
+    """Validates window bounds are inclusive and the original order is kept."""
+    intervals = [
+        (12.0, 15.0, 'EVAL'),  # Inside [10, 20].
+        (10.0, 20.0, 'SYNC'),  # Exactly the window: inside.
+        (18.0, 25.0, 'EVAL'),  # Ends after the window.
+        (5.0, 12.0, 'EVAL'),  # Starts before the window.
+    ]
+    lookup = goodput._custom_sync_lookup(intervals)
+
+    self.assertEqual(
+        lookup(10.0, 20.0), [(12.0, 15.0, 'EVAL'), (10.0, 20.0, 'SYNC')]
+    )
+    self.assertEqual(lookup(20.0, 30.0), [])
+
+  def test_lookup_matches_linear_scan(self):
+    """Validates the lookup against a scan over every interval."""
+    rng = random.Random(0)
+    intervals = []
+    for _ in range(500):
+      start = rng.uniform(0.0, 1000.0)
+      end = start + rng.uniform(0.01, 30.0)
+      intervals.append((start, end, rng.choice(['EVAL', 'SYNC'])))
+    lookup = goodput._custom_sync_lookup(intervals)
+
+    for _ in range(200):
+      window_start = rng.uniform(0.0, 1000.0)
+      window_end = window_start + rng.uniform(0.0, 50.0)
+      expected = [
+          interval
+          for interval in intervals
+          if window_start <= interval[0] and interval[1] <= window_end
+      ]
+      self.assertEqual(lookup(window_start, window_end), expected)
+
+
 if __name__ == '__main__':
   googletest.main()

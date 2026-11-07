@@ -1658,7 +1658,26 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
 
     # Only consider the last step productive if the job has completed.
     if job_end_time is not None:
-      last_step_delta = job_end_time - step_start_data[last_step]
+      last_step_start_time = step_start_data[last_step]
+      last_step_delta = job_end_time - last_step_start_time
+      # Deduct custom badput events inside the last step window (for example a
+      # final evaluation before the job ends), as for every earlier step.
+      last_step_custom_sync: dict[str, float] = {}
+      for sync_start, sync_end, sync_type in (
+          self._extract_custom_sync_intervals(entries_to_process)
+      ):
+        if last_step_start_time <= sync_start and sync_end <= job_end_time:
+          last_step_custom_sync[sync_type] = (
+              last_step_custom_sync.get(sync_type, 0.0) + sync_end - sync_start
+          )
+      if last_step_custom_sync:
+        last_step_delta = max(
+            0.0, last_step_delta - sum(last_step_custom_sync.values())
+        )
+        self._accumulate_unproductive_time(
+            {BadputType.CUSTOM_BADPUT_EVENTS: last_step_custom_sync},
+            total_unproductive_time,
+        )
       last_step_save_by_type = self._get_checkpoint_save_by_type_in_window(
           save_events, last_step, step_start_data[last_step], job_end_time
       )

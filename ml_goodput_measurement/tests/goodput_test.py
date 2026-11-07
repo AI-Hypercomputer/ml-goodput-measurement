@@ -2225,6 +2225,66 @@ class BadputTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_badput_calculator_custom_sync_badput_in_last_step(self):
+    """Validates a custom badput event after the last step start is Badput."""
+
+    job_start_time = _TEST_JOB_START_TIME
+    self.goodput_recorder.record_job_start_time(job_start_time)
+
+    # Mock TPU initialization.
+    self.goodput_recorder.record_tpu_init_start_time(job_start_time)
+    self.goodput_recorder.record_tpu_init_end_time(
+        job_start_time + _TEST_TPU_INIT_TIME
+    )
+
+    # Mock _TEST_TOTAL_STEPS steps of training with built-in badput
+    # due to program startup.
+    step_start_time = (
+        job_start_time + _TEST_TPU_INIT_TIME + _TEST_PROGRAM_STARTUP_TIME
+    )
+    for step in range(_TEST_TOTAL_STEPS):
+      self.goodput_recorder.record_step_start_time(step, step_start_time)
+      step_start_time += _TEST_STEP_TIME
+
+    # A final evaluation runs after the last step, then the job ends.
+    eval_sync_badput_time = datetime.timedelta(seconds=30)
+    self.goodput_recorder.record_custom_badput_event_start_time(
+        step_start_time, 'eval_step'
+    )
+    self.goodput_recorder.record_custom_badput_event_end_time(
+        step_start_time + eval_sync_badput_time, 'eval_step'
+    )
+    total_time = (
+        _TEST_TPU_INIT_TIME
+        + _TEST_PROGRAM_STARTUP_TIME
+        + _TEST_STEP_TIME * _TEST_TOTAL_STEPS
+        + eval_sync_badput_time
+    )
+    self.goodput_recorder.record_job_end_time(job_start_time + total_time)
+
+    computed_goodput, computed_badput_breakdown, _ = (
+        self.goodput_calculator.get_job_goodput(include_badput_breakdown=True)
+    )
+    # The evaluation is Badput, not part of the last step.
+    expected_badput_due_to_custom_sync = (
+        eval_sync_badput_time.total_seconds()
+        / total_time.total_seconds()
+        * 100
+    )
+    self.assertAlmostEqual(
+        computed_badput_breakdown[BadputType.CUSTOM_BADPUT_EVENTS][
+            'EVAL_STEP'
+        ],
+        expected_badput_due_to_custom_sync,
+        delta=0.1,
+    )
+    expected_goodput = (
+        (_TEST_STEP_TIME * _TEST_TOTAL_STEPS).total_seconds()
+        / total_time.total_seconds()
+        * 100
+    )
+    self.assertAlmostEqual(computed_goodput, expected_goodput, delta=0.1)
+
   def test_goodput_with_disruption_and_caching(self):
     """Test function to validate goodput with disruption and caching.
 

@@ -21,6 +21,29 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [0.2.4] - 2026-11-09
+
+### Fixed
+
+* Elastic and checkpoint calculation edge cases: in-process elastic restarts
+  are detected without `job_start_time`; checkpoint restore time inside
+  `ELASTIC_REINITIALIZATION` is not double counted; synchronous checkpoint save
+  time is deducted per step before `PROGRAM_STARTUP`; a post-restart segment
+  with a single completed step falls back to historical step times; `None`
+  checkpoint durations no longer fail the query. Fixes the
+  "Productive training time is invalid" error and the Goodput drop after a
+  JobSet restart.
+* Elastic restart detection during jump-forward rollbacks and sequential
+  restarts.
+
+### Changed
+
+* `PROGRAM_STARTUP` detection covers the first steps of a segment, so
+  compilation that lands on a later step (asynchronous dispatch) is attributed
+  to startup instead of inflating the baseline step time.
+* Custom badput events inside the last step window are deducted from Goodput
+  and reported in the `CUSTOM_BADPUT_EVENTS` breakdown.
+
 ## [0.2.3] - 2026-08-14
 
 ### Added
@@ -164,6 +187,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[0.2.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.0.16...v0.2.0

@@ -18,6 +18,8 @@
 <!-- NEWS START -->
 ## 🔥 Latest news 🔥
 
+- [November 9, 2026] **Release v0.2.4**: Elastic restart and checkpoint
+  calculation fixes; custom badput events in the last step are counted.
 - [August 14, 2026] **Release v0.2.3**: Introduced a GCS Cache Sync to speed up cold start reads.
 - [August 6, 2026] **Release v0.2.2**: Enabled Google Cloud Monitoring (GCM)
   upload for slice efficiency metrics and optimized final flushes.

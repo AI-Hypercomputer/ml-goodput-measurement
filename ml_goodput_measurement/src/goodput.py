@@ -5,11 +5,12 @@ library for users to measure and monitor Goodput, Badput and Step Time
 Deviation.
 """
 
+import bisect
 import datetime
 import functools
 import logging
 import threading
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from cloud_goodput.ml_goodput_measurement.src import checkpoint_badput_calculator
 from cloud_goodput.ml_goodput_measurement.src import goodput_cache
@@ -66,6 +67,38 @@ _CLOUD_LOGGING_PAGE_SIZE = 1000000
 _CLOUD_LOGGING_DEFAULT_RETENTION = datetime.timedelta(days=7)
 
 logger = logging.getLogger(__name__)
+
+
+def _custom_sync_lookup(
+    intervals: list[tuple[float, float, str]],
+) -> Callable[[float, float], list[tuple[float, float, str]]]:
+  """Indexes custom badput intervals by start time for window lookups.
+
+  Args:
+    intervals: `(start_time, end_time, sync_type)` tuples, as returned by
+      `_extract_custom_sync_intervals`.
+
+  Returns:
+    A function of `(window_start, window_end)` that returns the intervals lying
+    entirely inside the window, in their original order. It only visits the
+    intervals that start inside the window, so a lookup costs O(log n + k)
+    instead of a scan over all n intervals.
+  """
+  order = sorted(range(len(intervals)), key=lambda index: intervals[index][0])
+  starts = [intervals[index][0] for index in order]
+
+  def lookup(
+      window_start: float, window_end: float
+  ) -> list[tuple[float, float, str]]:
+    first = bisect.bisect_left(starts, window_start)
+    last = bisect.bisect_right(starts, window_end)
+    return [
+        intervals[index]
+        for index in sorted(order[first:last])
+        if intervals[index][1] <= window_end
+    ]
+
+  return lookup
 
 
 class _CloudLogger:
@@ -1150,6 +1183,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
 
       steps_in_segment = 0
       max_productive_step_count = 0
+      custom_syncs_in_window = _custom_sync_lookup(custom_sync_intervals)
 
       for i in range(1, len(step_items)):
         prev_step, prev_time = step_items[i - 1]
@@ -1158,14 +1192,15 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         raw_delta = curr_time - prev_time
 
         custom_sync_in_interval = 0.0
-        for sync_start, sync_end, sync_type in custom_sync_intervals:
-          if prev_time <= sync_start and sync_end <= curr_time:
-            sync_duration = sync_end - sync_start
-            custom_sync_in_interval += sync_duration
-            if curr_step_num <= curr_step:
-              custom_sync_breakdown[sync_type] = (
-                  custom_sync_breakdown.get(sync_type, 0.0) + sync_duration
-              )
+        for sync_start, sync_end, sync_type in custom_syncs_in_window(
+            prev_time, curr_time
+        ):
+          sync_duration = sync_end - sync_start
+          custom_sync_in_interval += sync_duration
+          if curr_step_num <= curr_step:
+            custom_sync_breakdown[sync_type] = (
+                custom_sync_breakdown.get(sync_type, 0.0) + sync_duration
+            )
 
         adjusted_delta = max(0.0, raw_delta - custom_sync_in_interval)
 
@@ -1503,7 +1538,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       if restart_event is not None:
         restart_ts, restart_type = restart_event
         if step_start_data:
-          last_step_ts = step_start_data[list(step_start_data.keys())[-1]]
+          last_step_ts = step_start_data[next(reversed(step_start_data))]
           if restart_ts > last_step_ts:
             # Keep the earliest restart timestamp after `last_step_ts` (e.g.
             # `elastic_wait_start_time` before `elastic_reinit_start_time`),
@@ -1525,7 +1560,8 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           step_start_data[curr_step] = payload[_STEP_START_TIME]
           pending_restart_time = None
         else:
-          prev_step = list(step_start_data.keys())[-1]
+          # The last recorded step, in O(1) rather than copying every key.
+          prev_step = next(reversed(step_start_data))
           if curr_step > prev_step + 1:
             _handle_segment_restart(
                 'jump_forward', curr_step, prev_step, pending_restart_time

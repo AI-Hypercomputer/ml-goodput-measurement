@@ -321,6 +321,19 @@ class GoodputTest(googletest.TestCase):
     self.assertEqual(computed_goodput, expected_goodput)
     self.assertEqual(total_steps, _TEST_TOTAL_STEPS - 1)
 
+  def test_has_job_end_entry(self):
+    """Test that has_job_end_entry reflects only entries fetched into the cache."""
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    self.goodput_recorder.record_step_start_time(0, _TEST_STEP_START_TIME)
+    self.goodput_calculator.get_job_goodput()
+    self.assertFalse(self.goodput_calculator.has_job_end_entry())
+
+    self.goodput_recorder.record_job_end_time(_TEST_JOB_END_TIME)
+    # Written but not fetched yet: the check must not query Cloud Logging.
+    self.assertFalse(self.goodput_calculator.has_job_end_entry())
+    self.goodput_calculator.get_job_goodput()
+    self.assertTrue(self.goodput_calculator.has_job_end_entry())
+
   def test_goodput_with_startup_badput(self):
     """Test function to validate goodput with startup badput."""
 

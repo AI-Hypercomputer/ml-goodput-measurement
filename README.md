@@ -661,6 +661,10 @@ Following metrics are uploaded:
 goodput_monitor.start_goodput_uploader()
 ```
 
+> **_NOTE:_** `start_step_deviation_uploader` is deprecated. The goodput
+uploader already uploads the step time deviation and the ideal step time, and
+running both writes conflicting values to `workload/performance`.
+
 #### Stop the Goodput Uploader
 
 Call the `stop_goodput_uploader` API to perform a final upload of all metrics
@@ -777,16 +781,16 @@ goodput_monitor = monitoring.GoodputMonitor(
       upload_interval=config.goodput_upload_interval_seconds,
       monitoring_enabled=True,
       include_badput_breakdown=True,
-      include_step_deviation=True,
       configured_ideal_step_time=None, # Optional, the library will compute ideal step time if it is not provided
       gcp_options=gcp_options
     )
 ```
 
 If you do not wish to send metrics to Google Cloud Monitoring then please set
-the flag `enable_gcp_goodput_metrics` to `False` for disabling goodput metrics
-and `enable_gcp_step_deviation_metrics` to `False` for disabling step deviation
-metrics while creating the GCPOptions object.
+the flag `enable_gcp_goodput_metrics` to `False` while creating the GCPOptions
+object. This also disables the step time deviation and ideal step time metrics,
+which are sent with the goodput metrics. `enable_gcp_step_deviation_metrics`
+only applies to the deprecated `start_step_deviation_uploader`.
 
 Setting `monitoring_enabled` to `False` will disable both tensorboard and GCM
 monitoring.
@@ -811,7 +815,6 @@ goodput_monitor = monitoring.GoodputMonitor(
       upload_interval=config.goodput_upload_interval_seconds,
       monitoring_enabled=True,
       include_badput_breakdown=True,
-      include_step_deviation=True,
       configured_ideal_step_time=None,
       gcp_options=gcp_options,
     )

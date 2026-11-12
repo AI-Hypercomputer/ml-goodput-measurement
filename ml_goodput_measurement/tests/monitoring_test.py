@@ -941,6 +941,33 @@ class GoodputMonitorTests(absltest.TestCase):
     self.assertIsNone(goodput_monitor._step_deviation_process)
     self.assertTrue(goodput_monitor._step_deviation_termination_event.is_set())
 
+  def test_start_step_deviation_uploader_is_deprecated(self):
+    goodput_monitor = GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=False,
+    )
+    with self.assertWarns(DeprecationWarning):
+      goodput_monitor.start_step_deviation_uploader()
+
+  def test_goodput_upload_uses_configured_ideal_step_time(self):
+    calculator = MagicMock()
+    calculator.get_job_goodput.return_value = (50.0, {}, 10)
+    config = {
+        'job_name': self.job_name,
+        'include_badput_breakdown': False,
+        'configured_ideal_step_time': 2.5,
+        'gcp_options': GCPOptions(enable_gcp_goodput_metrics=False),
+    }
+    monitoring._query_and_upload_goodput_once(
+        calculator, MagicMock(), None, config, pid=0
+    )
+    calculator.get_job_goodput.assert_called_once_with(
+        include_badput_breakdown=False, configured_ideal_step_time=2.5
+    )
+
   @patch('google.cloud.monitoring_v3.MetricServiceClient')
   @patch('tensorboardX.writer.SummaryWriter')
   @patch('google.cloud.logging.Client')

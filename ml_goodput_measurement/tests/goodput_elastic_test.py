@@ -11,39 +11,70 @@ from google3.testing.pybase import googletest
 get_timestamp_from_log_entry = goodput_utils.get_timestamp_from_log_entry
 
 
+def _to_aware(dt):
+  return (
+      dt.replace(tzinfo=datetime.timezone.utc)
+      if dt is not None and dt.tzinfo is None
+      else dt
+  )
+
+
 class MockCloudLogger:
 
   def __init__(self, job_name, logger_name):
     self.job_name = job_name
     self.logger_name = logger_name
     self.entries = []
+    self.insert_ids = []
     self.last_entry_info = None
 
   def write_cloud_logging_entry(self, entry):
     timestamp = get_timestamp_from_log_entry(entry)
     if timestamp is not None:
       self.entries.append((timestamp, entry))
+      self.insert_ids.append(f'insert-id-{len(self.entries)}')
       self.last_entry_info = (timestamp, timestamp)
 
   def read_cloud_logging_entries(
       self, start_time=None, end_time=None, last_entry_info=None
   ):
-
-    def to_aware(dt):
-      return (
-          dt.replace(tzinfo=datetime.timezone.utc)
-          if dt is not None and dt.tzinfo is None
-          else dt
-      )
-
-    start_time = to_aware(start_time)
-    end_time = to_aware(end_time)
+    start_time = _to_aware(start_time)
+    end_time = _to_aware(end_time)
     return [
         entry
         for timestamp, entry in self.entries
-        if (start_time is None or to_aware(timestamp) > start_time)
-        and (end_time is None or to_aware(timestamp) <= end_time)
+        if (start_time is None or _to_aware(timestamp) > start_time)
+        and (end_time is None or _to_aware(timestamp) <= end_time)
     ], self.last_entry_info
+
+  def read_new_entries(
+      self, last_entry_info, end_time, overlap_seconds, known_entry_ids
+  ):
+    """Mirrors `_CloudLogger.read_new_entries` over the in-memory entries."""
+    cursor_ts, cursor_id = last_entry_info or (None, None)
+    window_start = None
+    if cursor_ts is not None:
+      window_start = _to_aware(cursor_ts) - datetime.timedelta(
+          seconds=overlap_seconds
+      )
+    end_time = _to_aware(end_time)
+    payloads = []
+    entry_ids = []
+    for (timestamp, entry), insert_id in sorted(
+        zip(self.entries, self.insert_ids), key=lambda item: item[0][0]
+    ):
+      timestamp = _to_aware(timestamp)
+      if window_start is not None and timestamp <= window_start:
+        continue
+      if end_time is not None and timestamp > end_time:
+        continue
+      if insert_id in known_entry_ids:
+        continue
+      payloads.append(entry)
+      entry_ids.append((insert_id, timestamp))
+      if cursor_ts is None or timestamp > cursor_ts:
+        cursor_ts, cursor_id = timestamp, insert_id
+    return payloads, (cursor_ts, cursor_id), entry_ids
 
 
 class ElasticGoodputTest(googletest.TestCase):

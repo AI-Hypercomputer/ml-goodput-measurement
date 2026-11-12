@@ -6,9 +6,12 @@ Deviation.
 """
 
 import bisect
+from collections.abc import Collection
 import datetime
 import functools
 import logging
+import math
+import os
 import threading
 from typing import Any, Callable, Optional, Union
 
@@ -67,7 +70,40 @@ _STARTUP_COMPILATION_WINDOW = 5
 _CLOUD_LOGGING_PAGE_SIZE = 1000000
 _CLOUD_LOGGING_DEFAULT_RETENTION = datetime.timedelta(days=7)
 
+# Incremental reads re-check this many seconds before the cursor for entries
+# that became queryable late, and stop this many seconds before the query time.
+DEFAULT_READ_OVERLAP_SECONDS = 300.0
+DEFAULT_READ_LAG_SECONDS = 0.0
+_READ_OVERLAP_SECONDS_ENV = 'ML_GOODPUT_READ_OVERLAP_SECONDS'
+_READ_LAG_SECONDS_ENV = 'ML_GOODPUT_READ_LAG_SECONDS'
+
 logger = logging.getLogger(__name__)
+
+
+def _seconds_from_env(name: str, default: float) -> float:
+  """Reads a number of seconds from the environment.
+
+  Args:
+    name: Name of the environment variable.
+    default: Value to use when the variable is unset or invalid.
+
+  Returns:
+    The variable's value, or `default` when it is unset or not a finite,
+    non-negative number (which is logged as a warning).
+  """
+  value = os.environ.get(name)
+  if value is None:
+    return default
+  try:
+    seconds = float(value)
+  except ValueError:
+    seconds = -1.0
+  if not math.isfinite(seconds) or seconds < 0.0:
+    logger.warning(
+        'Ignoring invalid %s=%r; using %s seconds.', name, value, default
+    )
+    return default
+  return seconds
 
 
 def _custom_sync_lookup(
@@ -350,6 +386,77 @@ class _CloudLogger:
     entry_payload = [entry['payload'] for entry in entries_info]
     self._update_job_start_time(entry_payload)
     return entry_payload, (current_last_entry_ts, current_last_entry_id)
+
+  def read_new_entries(
+      self,
+      last_entry_info: Optional[tuple[datetime.datetime, str]],
+      end_time: Optional[datetime.datetime],
+      overlap_seconds: float,
+      known_entry_ids: Collection[str],
+  ) -> tuple[
+      list[Any],
+      tuple[Optional[datetime.datetime], Optional[str]],
+      list[tuple[str, datetime.datetime]],
+  ]:
+    """Reads the entries logged up to `end_time` that were not read before.
+
+    Entries become queryable some time after their timestamp: the recorder
+    stamps them client-side and uploads them in batches, Orbax writes through
+    its own logger, and ingestion itself can lag. A read bounded by
+    `timestamp > cursor` therefore skips such entries for good. This read
+    starts `overlap_seconds` before the cursor and drops entries whose insertId
+    is in `known_entry_ids`, so a late entry is returned exactly once.
+
+    Args:
+      last_entry_info: `(timestamp, insert_id)` of the newest entry read so
+        far, or None to read everything within the retention period.
+      end_time: Inclusive upper bound of the query window, or None for the
+        current time.
+      overlap_seconds: How far before the cursor to re-check for late entries.
+        With 0 the read starts right after the cursor, as before.
+      known_entry_ids: insertIds already in the cache; such entries are
+        dropped.
+
+    Returns:
+      A tuple of the new entry payloads in ascending timestamp order, the
+      cursor `(timestamp, insert_id)` advanced to the newest entry seen (it
+      never moves backward because of a late entry), and `(insert_id,
+      timestamp)` for every returned entry.
+    """
+    import google.cloud.logging  # pylint: disable=g-import-not-at-top
+
+    if last_entry_info is not None and overlap_seconds > 0:
+      window_start = last_entry_info[0] - datetime.timedelta(
+          seconds=overlap_seconds
+      )
+      filter_msg = self._get_filter_msg(window_start, end_time)
+    else:
+      filter_msg = self._get_filter_msg(None, end_time, last_entry_info)
+    entries = self.logger.list_entries(
+        filter_=filter_msg,
+        order_by=google.cloud.logging.ASCENDING,
+        page_size=_CLOUD_LOGGING_PAGE_SIZE,
+    )
+
+    cursor_ts, cursor_id = last_entry_info or (None, None)
+    payloads = []
+    entry_ids = []
+    for entry in entries:
+      if (
+          entry.insert_id in known_entry_ids
+          or (entry.timestamp, entry.insert_id) == last_entry_info
+      ):
+        continue
+      payloads.append(entry.payload)
+      entry_ids.append((entry.insert_id, entry.timestamp))
+      if cursor_ts is None or (entry.timestamp, entry.insert_id) > (
+          cursor_ts,
+          cursor_id or '',
+      ):
+        cursor_ts, cursor_id = entry.timestamp, entry.insert_id
+
+    self._update_job_start_time(payloads)
+    return payloads, (cursor_ts, cursor_id), entry_ids
 
 
 class GoodputRecorder:
@@ -675,6 +782,8 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       cache_dir: str = '/tmp',
       *,
       min_step_time: float = 1.0,
+      read_overlap_seconds: float = DEFAULT_READ_OVERLAP_SECONDS,
+      read_lag_seconds: float = DEFAULT_READ_LAG_SECONDS,
   ):
     """GoodputCalculator constructor.
 
@@ -690,10 +799,22 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
       min_step_time: Shortest step time, in seconds, taken into account when
         computing the ideal step time. Pass 0.0 for workloads with sub-second
         steps.
+      read_overlap_seconds: How far before the last entry read each incremental
+        Cloud Logging read starts again, to pick up entries that became
+        queryable late. Overridden by `ML_GOODPUT_READ_OVERLAP_SECONDS`.
+      read_lag_seconds: How far before the query time each read stops, leaving
+        the newest entries for the next read. Overridden by
+        `ML_GOODPUT_READ_LAG_SECONDS`.
     """
     self.job_name = job_name
     self.using_pathways = using_pathways
     self._min_step_time = min_step_time
+    self._read_overlap_seconds = _seconds_from_env(
+        _READ_OVERLAP_SECONDS_ENV, read_overlap_seconds
+    )
+    self._read_lag_seconds = _seconds_from_env(
+        _READ_LAG_SECONDS_ENV, read_lag_seconds
+    )
     self._interval_cache = []
     self._last_interval_entry_info: Optional[
         tuple[datetime.datetime, str]
@@ -712,6 +833,7 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         job_name=job_name,
         gcs_path=gcs_path,
         cache_dir=cache_dir,
+        read_overlap_seconds=self._read_overlap_seconds,
     )
     self._goodput_cache_lock = threading.Lock()
     self._interval_entries = []
@@ -1940,35 +2062,53 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     return 0.0
 
   def _fetch_new_entries(self, query_time: datetime.datetime) -> list[Any]:
-    """Thread-safe helper function to update and return new log entries."""
-    new_entries = []
-    current_last_entry_info = None
-    with self._goodput_cache_lock:
-      if not self._goodput_cache.is_cache_empty():
-        cached_last_entry_info = self._goodput_cache.get_last_entry_info()
-        if cached_last_entry_info:
-          cached_last_entry_ts, _ = cached_last_entry_info
-          if (
-              cached_last_entry_ts is not None
-              and query_time <= cached_last_entry_ts
-          ):
-            return []
+    """Thread-safe helper function to update and return new log entries.
 
-          new_entries, current_last_entry_info = (
-              self._cloud_logger.read_cloud_logging_entries(
-                  start_time=cached_last_entry_ts,
-                  end_time=query_time,
-                  last_entry_info=cached_last_entry_info,
-              )
-          )
+    An incremental read stops `read_lag_seconds` before `query_time` and starts
+    `read_overlap_seconds` before the cursor (capped by the cache to the window
+    whose insertIds it knows), so entries that became queryable late are still
+    picked up, exactly once; see `_CloudLogger.read_new_entries`.
+
+    Args:
+      query_time: The time at which the query is being made.
+
+    Returns:
+      The entries appended to the cache by this read.
+    """
+    with self._goodput_cache_lock:
+      last_entry_info = self._goodput_cache.get_last_entry_info()
+      if last_entry_info is None and not self._goodput_cache.is_cache_empty():
+        logger.warning(
+            'The cached timeline for job %s has no read cursor; discarding it'
+            ' and reading all entries again from Cloud Logging.',
+            self.job_name,
+        )
+        self._goodput_cache.clear_cache()
+
+      if last_entry_info is None or self._goodput_cache.is_cache_empty():
+        # First read of this cache: everything within the retention period up
+        # to now, as before. The next read's overlap covers late entries.
+        new_entries, current_last_entry_info, entry_ids = (
+            self._cloud_logger.read_new_entries(None, None, 0.0, ())
+        )
       else:
-        new_entries, current_last_entry_info = (
-            self._cloud_logger.read_cloud_logging_entries()
+        end_time = query_time - datetime.timedelta(
+            seconds=self._read_lag_seconds
+        )
+        if end_time <= last_entry_info[0]:
+          return []
+        new_entries, current_last_entry_info, entry_ids = (
+            self._cloud_logger.read_new_entries(
+                last_entry_info,
+                end_time,
+                self._goodput_cache.get_read_overlap_seconds(),
+                self._goodput_cache.get_recent_entry_ids(),
+            )
         )
 
       # Update the cache with the new log entries.
       self._goodput_cache.update_cached_entries(
-          new_entries, current_last_entry_info
+          new_entries, current_last_entry_info, entry_ids
       )
       return new_entries
 

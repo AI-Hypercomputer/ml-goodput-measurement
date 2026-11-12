@@ -414,6 +414,12 @@ def _create_goodput_calculator(config: dict) -> GoodputCalculator:
       cache_dir=config.get('cache_dir', '/tmp'),
       max_logs_retention_period=config.get('max_logs_retention_period'),
       min_step_time=config.get('min_step_time', 1.0),
+      read_overlap_seconds=config.get(
+          'read_overlap_seconds', goodput.DEFAULT_READ_OVERLAP_SECONDS
+      ),
+      read_lag_seconds=config.get(
+          'read_lag_seconds', goodput.DEFAULT_READ_LAG_SECONDS
+      ),
   )
 
 
@@ -928,6 +934,8 @@ class GoodputMonitor:
       *,
       wait_for_job_end_seconds: float = 0.0,
       min_step_time: float = 1.0,
+      read_overlap_seconds: float = goodput.DEFAULT_READ_OVERLAP_SECONDS,
+      read_lag_seconds: float = goodput.DEFAULT_READ_LAG_SECONDS,
   ):
     """Initializes the GoodputMonitor.
 
@@ -980,6 +988,11 @@ class GoodputMonitor:
       min_step_time: Shortest step time, in seconds, taken into account when
         computing the ideal step time. Pass 0.0 for workloads with sub-second
         steps; ignored if configured_ideal_step_time is set.
+      read_overlap_seconds: How far before the last entry read each incremental
+        Cloud Logging read starts again, to pick up entries that became
+        queryable late. Overridden by `ML_GOODPUT_READ_OVERLAP_SECONDS`.
+      read_lag_seconds: How far before the query time each read stops.
+        Overridden by `ML_GOODPUT_READ_LAG_SECONDS`.
     """
     if not monitoring_enabled:
       logger.info(
@@ -1032,6 +1045,8 @@ class GoodputMonitor:
         cache_dir=cache_dir,
         max_logs_retention_period=max_logs_retention_period,
         min_step_time=min_step_time,
+        read_overlap_seconds=read_overlap_seconds,
+        read_lag_seconds=read_lag_seconds,
     )
     tensorboard_path = os.path.join(tensorboard_dir, _TENSORBOARD_GCS_SUBDIR)
     self._writer = writer.SummaryWriter(tensorboard_path)
@@ -1077,6 +1092,8 @@ class GoodputMonitor:
         'cache_dir': cache_dir,
         'max_logs_retention_period': max_logs_retention_period,
         'wait_for_job_end_seconds': wait_for_job_end_seconds,
+        'read_overlap_seconds': read_overlap_seconds,
+        'read_lag_seconds': read_lag_seconds,
     }
 
     # Process management attributes

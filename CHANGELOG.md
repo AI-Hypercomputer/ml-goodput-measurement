@@ -21,6 +21,16 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [Unreleased]
+
+### Fixed
+
+* Cloud Logging entries that become visible after the read cursor passed their
+  timestamp are read now (overlap window with `insertId` de-duplication; see
+  `read_overlap_seconds` and `read_lag_seconds`).
+* A cached timeline without a usable cursor is read again instead of never
+  fetching new entries.
+
 ## [0.2.4] - 2026-11-09
 
 ### Fixed
@@ -187,6 +197,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[Unreleased]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.4...HEAD
 [0.2.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.0...v0.2.2

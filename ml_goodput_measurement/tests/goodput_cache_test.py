@@ -1,6 +1,9 @@
 """Tests to unit test GoodputCache class."""
 
 import datetime
+import json
+import os
+from typing import Any
 
 from cloud_goodput.ml_goodput_measurement.src import goodput_cache
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
@@ -9,6 +12,22 @@ from google3.testing.pybase import googletest
 
 BadputType = goodput_utils.BadputType
 GoodputInfo = goodput_utils.GoodputInfo
+
+_CURSOR_TIME = datetime.datetime(
+    2025, 1, 1, 0, 5, 0, tzinfo=datetime.timezone.utc
+)
+
+
+def _step_entry(step: int, timestamp: datetime.datetime) -> dict[str, float]:
+  return {'step_count': step, 'step_start_time': timestamp.timestamp()}
+
+
+def _write_timeline(
+    cache_dir: str, job_name: str, entries: list[dict[str, Any]]
+):
+  with open(os.path.join(cache_dir, f'{job_name}_timeline.jsonl'), 'w') as f:
+    for entry in entries:
+      f.write(json.dumps(entry) + '\n')
 
 
 class GoodputCacheTest(googletest.TestCase):
@@ -110,6 +129,144 @@ class GoodputCacheTest(googletest.TestCase):
     self.assertIsNone(cache.get_job_start_time())
     self.assertIsNone(cache.get_job_end_time())
     self.assertIsNone(cache.get_last_entry_info())
+
+  def test_recent_entry_ids_are_pruned_to_overlap(self):
+    cache = goodput_cache.GoodputCache(
+        job_name=self.job_name,
+        cache_dir=self.create_tempdir().full_path,
+        read_overlap_seconds=100.0,
+    )
+    old_time = _CURSOR_TIME - datetime.timedelta(seconds=150)
+    recent_time = _CURSOR_TIME - datetime.timedelta(seconds=50)
+
+    cache.update_cached_entries(
+        [
+            _step_entry(0, old_time),
+            _step_entry(1, recent_time),
+            _step_entry(2, _CURSOR_TIME),
+        ],
+        (_CURSOR_TIME, 'id-2'),
+        [('id-0', old_time), ('id-1', recent_time), ('id-2', _CURSOR_TIME)],
+    )
+
+    self.assertEqual(
+        cache.get_recent_entry_ids(),
+        {'id-1': recent_time, 'id-2': _CURSOR_TIME},
+    )
+    self.assertEqual(cache.get_read_overlap_seconds(), 100.0)
+    with open(cache._local_metadata_path) as f:
+      metadata = json.load(f)
+    self.assertEqual(metadata['last_entry_id'], 'id-2')
+    self.assertEqual(
+        metadata['recent_entry_ids'],
+        [
+            ['id-1', recent_time.isoformat()],
+            ['id-2', _CURSOR_TIME.isoformat()],
+        ],
+    )
+
+  def test_metadata_round_trip(self):
+    cache_dir = self.create_tempdir().full_path
+    cache = goodput_cache.GoodputCache(
+        job_name=self.job_name, cache_dir=cache_dir, read_overlap_seconds=100.0
+    )
+    earlier_time = _CURSOR_TIME - datetime.timedelta(seconds=30)
+    cache.update_cached_entries(
+        [_step_entry(0, earlier_time), _step_entry(1, _CURSOR_TIME)],
+        (_CURSOR_TIME, 'id-1'),
+        [('id-0', earlier_time), ('id-1', _CURSOR_TIME)],
+    )
+
+    resumed = goodput_cache.GoodputCache(
+        job_name=self.job_name, cache_dir=cache_dir, read_overlap_seconds=100.0
+    )
+
+    self.assertEqual(resumed.get_last_entry_info(), (_CURSOR_TIME, 'id-1'))
+    self.assertEqual(
+        resumed.get_recent_entry_ids(),
+        {'id-0': earlier_time, 'id-1': _CURSOR_TIME},
+    )
+    self.assertEqual(resumed.get_read_overlap_seconds(), 100.0)
+
+  def test_metadata_without_ids_caps_overlap(self):
+    cache_dir = self.create_tempdir().full_path
+    _write_timeline(cache_dir, self.job_name, [_step_entry(0, _CURSOR_TIME)])
+    metadata_path = os.path.join(cache_dir, f'{self.job_name}_metadata.json')
+    with open(metadata_path, 'w') as f:
+      json.dump(
+          {
+              'last_entry_timestamp': _CURSOR_TIME.isoformat(),
+              'last_entry_id': 'id-0',
+          },
+          f,
+      )
+
+    cache = goodput_cache.GoodputCache(
+        job_name=self.job_name, cache_dir=cache_dir, read_overlap_seconds=100.0
+    )
+
+    # Nothing below the cursor may be re-read: its ids are unknown.
+    self.assertEqual(cache.get_last_entry_info(), (_CURSOR_TIME, 'id-0'))
+    self.assertEqual(cache.get_recent_entry_ids(), {})
+    self.assertEqual(cache.get_read_overlap_seconds(), 0.0)
+
+    # The overlap grows with the cursor as ids become known.
+    later_time = _CURSOR_TIME + datetime.timedelta(seconds=40)
+    cache.update_cached_entries(
+        [_step_entry(1, later_time)],
+        (later_time, 'id-1'),
+        [('id-1', later_time)],
+    )
+    self.assertEqual(cache.get_read_overlap_seconds(), 40.0)
+
+    latest_time = _CURSOR_TIME + datetime.timedelta(seconds=400)
+    cache.update_cached_entries(
+        [_step_entry(2, latest_time)],
+        (latest_time, 'id-2'),
+        [('id-2', latest_time)],
+    )
+    self.assertEqual(cache.get_read_overlap_seconds(), 100.0)
+    self.assertEqual(cache.get_recent_entry_ids(), {'id-2': latest_time})
+
+  def test_cached_entries_are_sorted_by_timestamp(self):
+    cache = goodput_cache.GoodputCache(
+        job_name=self.job_name, cache_dir=self.create_tempdir().full_path
+    )
+    base_time = _CURSOR_TIME.timestamp()
+    entries = [
+        {'step_count': 0, 'step_start_time': base_time},
+        {'step_count': 2, 'step_start_time': base_time + 6},
+        {'no_timestamp': 'keeps its position after step 2'},
+        {'step_count': 1, 'step_start_time': base_time + 3},
+        {
+            'event_type': 'save',
+            'step': 0,
+            'checkpoint_manager_blocking_start_time': base_time + 1,
+            'checkpoint_manager_blocking_duration_secs': 1.0,
+        },
+    ]
+    cache.update_cached_entries(entries, (_CURSOR_TIME, 'id-4'), [])
+
+    self.assertEqual(
+        cache.get_cached_entries(),
+        [entries[0], entries[4], entries[3], entries[1], entries[2]],
+    )
+    self.assertEqual(
+        cache.get_step_entries(), [entries[0], entries[3], entries[1]]
+    )
+
+  def test_timeline_without_metadata_is_cleared(self):
+    cache_dir = self.create_tempdir().full_path
+    _write_timeline(cache_dir, self.job_name, [_step_entry(0, _CURSOR_TIME)])
+
+    with self.assertLogs(level='WARNING') as logs:
+      cache = goodput_cache.GoodputCache(
+          job_name=self.job_name, cache_dir=cache_dir
+      )
+
+    self.assertTrue(cache.is_cache_empty())
+    self.assertIsNone(cache.get_last_entry_info())
+    self.assertIn('no read cursor', logs.output[0])
 
   def test_is_cache_empty(self):
     self.assertTrue(self.goodput_cache.is_cache_empty())

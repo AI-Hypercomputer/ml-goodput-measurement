@@ -2,6 +2,7 @@
 
 import datetime
 
+from cloud_goodput.ml_goodput_measurement.src import goodput
 from cloud_goodput.ml_goodput_measurement.src import goodput_elastic
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 from cloud_goodput.ml_goodput_measurement.src import monitoring
@@ -37,6 +38,8 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
       gcs_sync_interval_seconds: int = 3600,
       cache_dir: str = '/tmp',
       max_logs_retention_period: datetime.timedelta | None = None,
+      read_overlap_seconds: float = goodput.DEFAULT_READ_OVERLAP_SECONDS,
+      read_lag_seconds: float = goodput.DEFAULT_READ_LAG_SECONDS,
   ):
     super().__init__(
         job_name=job_name,
@@ -55,6 +58,8 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
         gcs_sync_interval_seconds=gcs_sync_interval_seconds,
         cache_dir=cache_dir,
         max_logs_retention_period=max_logs_retention_period,
+        read_overlap_seconds=read_overlap_seconds,
+        read_lag_seconds=read_lag_seconds,
     )
     if self._initialized:
       # Replace base calculator with elastic-aware one.
@@ -65,6 +70,8 @@ class ElasticGoodputMonitor(monitoring.GoodputMonitor):
           gcs_path=tensorboard_dir,
           cache_dir=self._worker_config['cache_dir'],
           max_logs_retention_period=max_logs_retention_period,
+          read_overlap_seconds=read_overlap_seconds,
+          read_lag_seconds=read_lag_seconds,
       )
       self._worker_config['calculator_class'] = (
           goodput_elastic.ElasticGoodputCalculator

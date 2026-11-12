@@ -156,6 +156,29 @@ class ElasticGoodputMonitorTests(absltest.TestCase):
         '/tmp/custom_cache',
     )
 
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_elastic_goodput_monitor_passes_read_knobs(
+      self, mock_logger_client, mock_summary_writer
+  ):
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+
+    monitor = monitoring_elastic.ElasticGoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        read_overlap_seconds=45.0,
+        read_lag_seconds=5.0,
+    )
+
+    self.assertEqual(monitor._worker_config['read_overlap_seconds'], 45.0)
+    self.assertEqual(monitor._worker_config['read_lag_seconds'], 5.0)
+    self.assertEqual(monitor._goodput_calculator._read_overlap_seconds, 45.0)
+    self.assertEqual(monitor._goodput_calculator._read_lag_seconds, 5.0)
+
   @patch('google.cloud.monitoring_v3.MetricServiceClient')
   @patch('tensorboardX.writer.SummaryWriter')
   @patch('google.cloud.logging.Client')

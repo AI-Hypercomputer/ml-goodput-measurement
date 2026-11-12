@@ -216,6 +216,34 @@ class GoodputMonitorTests(absltest.TestCase):
         include_badput_breakdown=False, configured_ideal_step_time=2.5
     )
 
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_goodput_monitor_passes_read_knobs(
+      self, mock_logger_client, mock_summary_writer
+  ):
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+
+    goodput_monitor = GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        read_overlap_seconds=45.0,
+        read_lag_seconds=5.0,
+    )
+
+    worker_config = goodput_monitor._worker_config
+    self.assertEqual(worker_config['read_overlap_seconds'], 45.0)
+    self.assertEqual(worker_config['read_lag_seconds'], 5.0)
+    calculator = goodput_monitor._goodput_calculator
+    self.assertEqual(calculator._read_overlap_seconds, 45.0)
+    self.assertEqual(calculator._read_lag_seconds, 5.0)
+    worker_calculator = monitoring._create_goodput_calculator(worker_config)
+    self.assertEqual(worker_calculator._read_overlap_seconds, 45.0)
+    self.assertEqual(worker_calculator._read_lag_seconds, 5.0)
+
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'
   )

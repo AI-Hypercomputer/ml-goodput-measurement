@@ -3,10 +3,12 @@
 import dataclasses
 from dataclasses import asdict
 import datetime
+import os
 import random
 import threading
 import time
 from typing import Optional
+from unittest import mock
 
 from cloud_goodput.ml_goodput_measurement.src import goodput
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
@@ -47,39 +49,70 @@ _TEST_ANOMALOUS_STEP_TIME = datetime.timedelta(seconds=30)
 _TEST_CUSTOM_BADPUT_TIME = datetime.timedelta(seconds=10)
 
 
+def _to_aware(dt):
+  return (
+      dt.replace(tzinfo=datetime.timezone.utc)
+      if dt is not None and dt.tzinfo is None
+      else dt
+  )
+
+
 class MockCloudLogger:
 
   def __init__(self, job_name, logger_name):
     self.job_name = job_name
     self.logger_name = logger_name
     self.entries = []
+    self.insert_ids = []
     self.last_entry_info = None
 
   def write_cloud_logging_entry(self, entry):
     timestamp = get_timestamp_from_log_entry(entry)
     if timestamp is not None:
       self.entries.append((timestamp, entry))
+      self.insert_ids.append(f'insert-id-{len(self.entries)}')
       self.last_entry_info = (timestamp, timestamp)
 
   def read_cloud_logging_entries(
       self, start_time=None, end_time=None, last_entry_info=None
   ):
-
-    def to_aware(dt):
-      return (
-          dt.replace(tzinfo=datetime.timezone.utc)
-          if dt is not None and dt.tzinfo is None
-          else dt
-      )
-
-    start_time = to_aware(start_time)
-    end_time = to_aware(end_time)
+    start_time = _to_aware(start_time)
+    end_time = _to_aware(end_time)
     return [
         entry
         for timestamp, entry in self.entries
-        if (start_time is None or to_aware(timestamp) > start_time)
-        and (end_time is None or to_aware(timestamp) <= end_time)
+        if (start_time is None or _to_aware(timestamp) > start_time)
+        and (end_time is None or _to_aware(timestamp) <= end_time)
     ], self.last_entry_info
+
+  def read_new_entries(
+      self, last_entry_info, end_time, overlap_seconds, known_entry_ids
+  ):
+    """Mirrors `_CloudLogger.read_new_entries` over the in-memory entries."""
+    cursor_ts, cursor_id = last_entry_info or (None, None)
+    window_start = None
+    if cursor_ts is not None:
+      window_start = _to_aware(cursor_ts) - datetime.timedelta(
+          seconds=overlap_seconds
+      )
+    end_time = _to_aware(end_time)
+    payloads = []
+    entry_ids = []
+    for (timestamp, entry), insert_id in sorted(
+        zip(self.entries, self.insert_ids), key=lambda item: item[0][0]
+    ):
+      timestamp = _to_aware(timestamp)
+      if window_start is not None and timestamp <= window_start:
+        continue
+      if end_time is not None and timestamp > end_time:
+        continue
+      if insert_id in known_entry_ids:
+        continue
+      payloads.append(entry)
+      entry_ids.append((insert_id, timestamp))
+      if cursor_ts is None or timestamp > cursor_ts:
+        cursor_ts, cursor_id = timestamp, insert_id
+    return payloads, (cursor_ts, cursor_id), entry_ids
 
 
 @dataclasses.dataclass
@@ -3551,6 +3584,198 @@ class GoodputExclusionIntegrationTest(googletest.TestCase):
         (10.0 / 45.0) * 100,
         delta=0.1,
     )
+
+
+class LateEntriesTest(googletest.TestCase):
+  """Incremental reads pick up entries that became visible late."""
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
+    self.logger_name = 'test-log'
+    self.temp_dir = self.create_tempdir().full_path
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput.GoodputRecorder(
+        self.job_name,
+        self.logger_name,
+        True,
+        self.mock_cloud_logger,
+    )
+    self.goodput_calculator = self._make_calculator()
+
+  def _make_calculator(self, **kwargs):
+    return goodput.GoodputCalculator(
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.temp_dir,
+        **kwargs,
+    )
+
+  def _step_time(self, offset_seconds):
+    return _TEST_STEP_START_TIME + datetime.timedelta(seconds=offset_seconds)
+
+  def _record_steps(self, steps_and_offsets):
+    for step, offset_seconds in steps_and_offsets:
+      self.goodput_recorder.record_step_start_time(
+          step, self._step_time(offset_seconds)
+      )
+
+  def _fetch(self, calculator=None, query_time=None):
+    calculator = calculator or self.goodput_calculator
+    query_time = query_time or datetime.datetime.now(datetime.timezone.utc)
+    return calculator._fetch_new_entries(query_time)
+
+  def test_defaults(self):
+    self.assertEqual(self.goodput_calculator._read_overlap_seconds, 300.0)
+    self.assertEqual(self.goodput_calculator._read_lag_seconds, 0.0)
+    self.assertEqual(
+        self.goodput_calculator._goodput_cache._read_overlap_seconds, 300.0
+    )
+
+  def test_late_entry_is_read_once_and_cursor_does_not_move_backward(self):
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    self._record_steps([(0, 0), (1, 3), (2, 6), (3, 9)])
+    self.assertLen(self._fetch(), 5)
+    cache = self.goodput_calculator._goodput_cache
+    self.assertEqual(cache.get_last_entry_info()[0], self._step_time(9))
+
+    # A data loading entry from step 1 becomes visible after the cursor passed
+    # its timestamp.
+    late_time = self._step_time(4)
+    self.goodput_recorder.record_data_loading_start_time(late_time)
+
+    late_entries = self._fetch()
+    self.assertLen(late_entries, 1)
+    self.assertEqual(
+        late_entries[0][goodput._DATA_LOADING_START_TIME], late_time.timestamp()
+    )
+    self.assertEqual(cache.get_last_entry_info()[0], self._step_time(9))
+    self.assertEmpty(self._fetch())
+    self.assertLen(cache.get_cached_entries(), 6)
+
+  def test_entries_inside_overlap_are_not_returned_twice(self):
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    self._record_steps([(0, 0), (1, 3), (2, 6)])
+    self.assertLen(self._fetch(), 4)
+
+    with mock.patch.object(
+        self.mock_cloud_logger,
+        'read_new_entries',
+        wraps=self.mock_cloud_logger.read_new_entries,
+    ) as read_new_entries:
+      self.assertEmpty(self._fetch())
+      self.assertEmpty(self._fetch())
+
+    # Both reads re-checked the overlap window with the ids already cached.
+    self.assertLen(read_new_entries.call_args_list, 2)
+    for call in read_new_entries.call_args_list:
+      _, _, overlap_seconds, known_entry_ids = call.args
+      self.assertEqual(overlap_seconds, 300.0)
+      self.assertLen(known_entry_ids, 4)
+    cache = self.goodput_calculator._goodput_cache
+    self.assertLen(cache.get_cached_entries(), 4)
+
+  def test_cached_entries_are_chronological_after_late_entries(self):
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    self._record_steps([(0, 0), (1, 3), (3, 9)])
+    self.assertLen(self._fetch(), 4)
+
+    # Step 2 and a synchronous save during step 1 arrive after step 3.
+    self._record_steps([(2, 6)])
+    self.mock_cloud_logger.write_cloud_logging_entry(
+        asdict(
+            MockSaveStepStatistics(
+                step=1,
+                directory='gs://bucket/path',
+                checkpoint_manager_blocking_start_time=self._step_time(
+                    4
+                ).timestamp(),
+                checkpoint_manager_blocking_duration_secs=1.0,
+                synchronous=True,
+            )
+        )
+    )
+    self.assertLen(self._fetch(), 2)
+
+    cached_entries = self.goodput_calculator._goodput_cache.get_cached_entries()
+    self.assertEqual(
+        [entry.get(goodput._STEP_COUNT) for entry in cached_entries],
+        [None, 0, 1, None, 2, 3],
+    )
+    self.assertEqual(cached_entries[3]['event_type'], 'save')
+    step_times = self.goodput_calculator._get_step_times(cached_entries)
+    self.assertEqual(step_times, {0: 3.0, 1: 2.0, 2: 3.0})
+
+  def test_timeline_without_cursor_is_read_again(self):
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    self._record_steps([(0, 0), (1, 3)])
+    self.assertLen(self._fetch(), 3)
+    cache = self.goodput_calculator._goodput_cache
+
+    # Metadata lost between processes: the new calculator starts over.
+    os.remove(cache._local_metadata_path)
+    with self.assertLogs(level='WARNING'):
+      resumed_calculator = self._make_calculator()
+    self.assertTrue(resumed_calculator._goodput_cache.is_cache_empty())
+    self.assertLen(self._fetch(resumed_calculator), 3)
+    self.assertLen(
+        resumed_calculator._goodput_cache.get_cached_entries(), 3
+    )
+
+    # Cursor lost at runtime: the next fetch starts over as well.
+    resumed_calculator._goodput_cache._last_entry_info = None
+    with self.assertLogs(level='WARNING'):
+      self.assertLen(self._fetch(resumed_calculator), 3)
+    self.assertLen(
+        resumed_calculator._goodput_cache.get_cached_entries(), 3
+    )
+
+  def test_read_lag_shifts_upper_bound(self):
+    calculator = self._make_calculator(read_lag_seconds=10.0)
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    self._record_steps([(0, 0)])
+    self.assertLen(self._fetch(calculator, self._step_time(20)), 2)
+
+    self._record_steps([(1, 5), (2, 15)])
+    # Reads stop 10 s before the query time, so step 2 is left for later.
+    self.assertLen(self._fetch(calculator, self._step_time(20)), 1)
+    self.assertEqual(
+        calculator._goodput_cache.get_last_entry_info()[0], self._step_time(5)
+    )
+    self.assertEmpty(self._fetch(calculator, self._step_time(14)))
+    self.assertLen(self._fetch(calculator, self._step_time(30)), 1)
+    self.assertEmpty(self._fetch(calculator, self._step_time(30)))
+
+  def test_read_knobs_from_environment(self):
+    with mock.patch.dict(
+        os.environ,
+        {
+            'ML_GOODPUT_READ_OVERLAP_SECONDS': '42.5',
+            'ML_GOODPUT_READ_LAG_SECONDS': '7',
+        },
+    ):
+      calculator = self._make_calculator(
+          read_overlap_seconds=1.0, read_lag_seconds=2.0
+      )
+    self.assertEqual(calculator._read_overlap_seconds, 42.5)
+    self.assertEqual(calculator._read_lag_seconds, 7.0)
+    self.assertEqual(calculator._goodput_cache._read_overlap_seconds, 42.5)
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            'ML_GOODPUT_READ_OVERLAP_SECONDS': 'soon',
+            'ML_GOODPUT_READ_LAG_SECONDS': '-1',
+        },
+    ):
+      with self.assertLogs(level='WARNING') as logs:
+        calculator = self._make_calculator(
+            read_overlap_seconds=1.0, read_lag_seconds=2.0
+        )
+    self.assertEqual(calculator._read_overlap_seconds, 1.0)
+    self.assertEqual(calculator._read_lag_seconds, 2.0)
+    self.assertLen(logs.output, 2)
 
 
 class CustomSyncLookupTest(googletest.TestCase):

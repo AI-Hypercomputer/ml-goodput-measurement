@@ -605,6 +605,14 @@ Create a `GoodputMonitor` object with the following parameters:
 > **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
    In JAX, for example, the check could be `if jax.process_index() == 0`
 
+`GoodputMonitor` and `GoodputCalculator` also accept `read_overlap_seconds`
+(default `300`) and `read_lag_seconds` (default `0`): each incremental Cloud
+Logging read starts that many seconds before the last entry read (entries are
+de-duplicated by `insertId`) and stops that many seconds before the query time,
+so entries that become visible late are still picked up. The environment
+variables `ML_GOODPUT_READ_OVERLAP_SECONDS` and `ML_GOODPUT_READ_LAG_SECONDS`
+override them.
+
 For example:
 
 ```python

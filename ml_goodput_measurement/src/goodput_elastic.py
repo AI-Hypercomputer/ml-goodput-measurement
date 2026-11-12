@@ -165,20 +165,6 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
     return tpu, prep
 
   @staticmethod
-  def _overlap_with_reinit(
-      intervals: list[tuple[float, float]],
-      reinit_intervals: list[tuple[float, float]],
-  ) -> float:
-    """Returns total seconds of overlap between intervals and any reinit interval."""
-    total = 0.0
-    for start, end in intervals:
-      for r_start, r_end in reinit_intervals:
-        overlap = min(end, r_end) - max(start, r_start)
-        if overlap > 0:
-          total += overlap
-    return total
-
-  @staticmethod
   def _extract_slice_count_entries(
       entries: list[dict[str, Any]],
   ) -> list[tuple[float, int, int, int]]:
@@ -274,44 +260,6 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
       )
     return None
 
-  @staticmethod
-  def _extract_restore_intervals(
-      entries: list[dict[str, Any]],
-  ) -> list[tuple[float, float]]:
-    """Extracts `[start_ts, end_ts]` intervals for checkpoint restore events.
-
-    Used to discount `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME` when a checkpoint
-    restore occurs inside an `ELASTIC_REINITIALIZATION` window so the restore
-    duration is not double-counted. Groups by `(step, is_local)` and averages
-    across multiple worker occurrences to match `CheckpointBadputCalculator`.
-
-    Args:
-      entries: List of Cloud Logging entry dictionaries.
-
-    Returns:
-      A list of `(restore_start_ts, restore_end_ts)` tuples.
-    """
-    grouped_restores: dict[tuple[Any, bool], list[tuple[float, float]]] = {}
-    for entry in entries:
-      if entry.get('event_type') in ('restore', 'emergency_restore'):
-        restore_start = entry.get('checkpoint_manager_start_time')
-        restore_duration = entry.get('checkpoint_manager_duration_secs')
-        if restore_start is not None and restore_duration is not None:
-          restore_start_ts = float(restore_start)
-          restore_duration_secs = float(restore_duration)
-          if restore_duration_secs > 0.0:
-            is_local = not str(entry.get('directory', '')).startswith('gs://')
-            key = (entry.get('step'), is_local)
-            grouped_restores.setdefault(key, []).append(
-                (restore_start_ts, restore_duration_secs)
-            )
-    restore_intervals = []
-    for items in grouped_restores.values():
-      avg_start = sum(s for s, _ in items) / len(items)
-      avg_duration = sum(d for _, d in items) / len(items)
-      restore_intervals.append((avg_start, avg_start + avg_duration))
-    return restore_intervals
-
   def _get_current_productive_and_unproductive_time(
       self, interval_query: Optional[bool] = False
   ) -> tuple[float, goodput.UnproductiveTimeDict, int, int]:
@@ -348,18 +296,23 @@ class ElasticGoodputCalculator(goodput.GoodputCalculator):
 
     # On elastic retries TPU_INIT, TRAINING_PREP, and CHECKPOINT_RESTORE are
     # already counted inside ELASTIC_REINITIALIZATION, so discount the overlap.
+    # The base calculator already took the restore time out of TRAINING_PREP,
+    # so only the rest of each preparation interval is discounted here.
     if reinit_intervals:
       tpu_intervals, prep_intervals = self._extract_init_intervals(entries)
       restore_intervals = self._extract_restore_intervals(entries)
       for bt, intervals in (
           (goodput_utils.BadputType.TPU_INITIALIZATION, tpu_intervals),
-          (goodput_utils.BadputType.TRAINING_PREP, prep_intervals),
+          (
+              goodput_utils.BadputType.TRAINING_PREP,
+              self._subtract_intervals(prep_intervals, restore_intervals),
+          ),
           (
               goodput_utils.BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME,
               restore_intervals,
           ),
       ):
-        overlap = self._overlap_with_reinit(intervals, reinit_intervals)
+        overlap = self._total_overlap(intervals, reinit_intervals)
         if overlap > 0 and bt in unproductive_time:
           unproductive_time[bt] = max(0.0, unproductive_time[bt] - overlap)  # pyrefly: ignore[unsupported-operation]
 

@@ -457,6 +457,68 @@ class ElasticGoodputCalculatorTest(googletest.TestCase):
         delta=0.1,
     )
 
+  def test_restore_inside_training_prep_inside_elastic_reinit(self):
+    """Training prep is discounted once when prep, restore and reinit nest."""
+    t0 = datetime.datetime(2026, 8, 27, 16, 0, 0, tzinfo=datetime.timezone.utc)
+    self.goodput_recorder.record_job_start_time(t0)
+
+    # Initial 4s training preparation, outside any reinit window.
+    prep_start = t0 + datetime.timedelta(seconds=1)
+    prep_end = prep_start + datetime.timedelta(seconds=4)
+    self.goodput_recorder.record_training_preparation_start_time(prep_start)
+    self.goodput_recorder.record_training_preparation_end_time(prep_end)
+
+    s0 = prep_end + datetime.timedelta(seconds=1)
+    self.goodput_recorder.record_step_start_time(0, s0)
+    s1 = s0 + datetime.timedelta(seconds=2)
+    self.goodput_recorder.record_step_start_time(1, s1)
+
+    # Elastic reinit at Step 1 (15s) that re-runs an 8s training preparation,
+    # which itself contains a 6s restore.
+    reinit_start = s1 + datetime.timedelta(seconds=2)
+    reinit_end = reinit_start + datetime.timedelta(seconds=15)
+    self.goodput_recorder.record_elastic_reinit_start_time(reinit_start)
+    reinit_prep_start = reinit_start + datetime.timedelta(seconds=1)
+    reinit_prep_end = reinit_prep_start + datetime.timedelta(seconds=8)
+    self.goodput_recorder.record_training_preparation_start_time(
+        reinit_prep_start
+    )
+    self.mock_cloud_logger.write_cloud_logging_entry({
+        'event_type': 'restore',
+        'step': 1,
+        'directory': 'gs://bucket/path',
+        'checkpoint_manager_start_time': reinit_start.timestamp() + 2.0,
+        'checkpoint_manager_duration_secs': 6.0,
+        'checkpointer_duration_secs': 6.0,
+    })
+    self.goodput_recorder.record_training_preparation_end_time(reinit_prep_end)
+    self.goodput_recorder.record_elastic_reinit_end_time(reinit_end)
+
+    s2 = reinit_end
+    self.goodput_recorder.record_step_start_time(2, s2)
+    job_end = s2 + datetime.timedelta(seconds=2)
+    self.goodput_recorder.record_job_end_time(job_end)
+
+    self.goodput_calculator._fetch_new_entries(job_end)
+    _, unprod, _, _ = (
+        self.goodput_calculator._get_current_productive_and_unproductive_time()
+    )
+    # Only the initial preparation remains: the reinit one is inside
+    # ELASTIC_REINITIALIZATION, and its restore part is not removed twice.
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.TRAINING_PREP], 4.0, delta=0.1
+    )
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME],
+        0.0,
+        delta=0.1,
+    )
+    self.assertAlmostEqual(
+        unprod[goodput_utils.BadputType.ELASTIC_REINITIALIZATION],
+        15.0,
+        delta=0.1,
+    )
+
 
 if __name__ == '__main__':
   googletest.main()

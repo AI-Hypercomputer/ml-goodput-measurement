@@ -596,6 +596,11 @@ Create a `GoodputMonitor` object with the following parameters:
         once per second) for the `job_end_time` entry to become readable from
         Cloud Logging before its last upload, so the last step is credited.
         Defaults to `0` (no wait); must fit inside `final_flush_timeout_seconds`.
+  10. `min_step_time`: The shortest step time (in seconds) taken into account
+        when computing the ideal step time. Defaults to `1.0`, which ignores
+        spuriously short step gaps; set it to `0.0` for workloads with
+        sub-second steps, otherwise no ideal step time or step deviation is
+        reported for them.
 
 > **_NOTE:_** Please ensure that only **one** worker enables monitoring of Goodput.
    In JAX, for example, the check could be `if jax.process_index() == 0`

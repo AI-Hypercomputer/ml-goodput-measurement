@@ -32,6 +32,7 @@ class GoodputExclusion:
   _number_of_interruptions: int
   _last_disrupted_step: int
   _last_disruption_time: float
+  _min_step_time: float
 
   def _fetch_new_entries(
       self, query_time: datetime.datetime
@@ -186,7 +187,9 @@ class GoodputExclusion:
     if configured_ideal_step_time:
       ideal_step_time = configured_ideal_step_time
     else:
-      ideal_step_time = goodput_utils.compute_ideal_step_time(step_times_list)
+      ideal_step_time = goodput_utils.compute_ideal_step_time(
+          step_times_list, min_step_time=self._min_step_time
+      )
 
     if ideal_step_time is None:
       return

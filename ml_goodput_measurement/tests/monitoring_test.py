@@ -153,6 +153,69 @@ class GoodputMonitorTests(absltest.TestCase):
           goodput_monitor._worker_config['cache_dir'], '/tmp/custom_cache_dir'
       )
 
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch.object(monitoring, 'GoodputCalculator')
+  def test_goodput_monitor_min_step_time(
+      self, mock_calculator_cls, mock_summary_writer
+  ):
+    """min_step_time reaches both the in-process and the worker calculators."""
+    mock_summary_writer.return_value = MagicMock()
+    goodput_monitor = GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        min_step_time=0.0,
+    )
+    self.assertEqual(goodput_monitor._worker_config['min_step_time'], 0.0)
+
+    monitoring._create_goodput_calculator(goodput_monitor._worker_config)
+
+    self.assertLen(mock_calculator_cls.call_args_list, 2)
+    for call in mock_calculator_cls.call_args_list:
+      self.assertEqual(call.kwargs['min_step_time'], 0.0)
+
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_cumulative_goodput_query_uses_configured_ideal_step_time(
+      self, mock_logger_client, mock_summary_writer
+  ):
+    mock_summary_writer.return_value = MagicMock()
+    mock_logger_client.return_value = MagicMock()
+    goodput_monitor = GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        configured_ideal_step_time=2.5,
+        gcp_options=GCPOptions(
+            enable_gcp_goodput_metrics=False,
+            enable_gcp_step_deviation_metrics=False,
+        ),
+    )
+    mock_calculator = MagicMock()
+    mock_calculator.get_job_goodput.return_value = (100.0, {}, 1)
+    goodput_monitor._goodput_calculator = mock_calculator
+
+    goodput_monitor._final_goodput_query_and_upload()
+    mock_calculator.get_job_goodput.assert_called_once_with(
+        include_badput_breakdown=False, configured_ideal_step_time=2.5
+    )
+
+    mock_calculator.get_job_goodput.reset_mock()
+    monitoring._query_and_upload_goodput_once(
+        mock_calculator,
+        MagicMock(),
+        None,
+        goodput_monitor._worker_config,
+        pid=0,
+    )
+    mock_calculator.get_job_goodput.assert_called_once_with(
+        include_badput_breakdown=False, configured_ideal_step_time=2.5
+    )
+
   @patch(
       'cloud_goodput.ml_goodput_measurement.src.monitoring.GoodputMonitor._final_goodput_query_and_upload'
   )

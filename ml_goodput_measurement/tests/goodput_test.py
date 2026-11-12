@@ -2130,6 +2130,109 @@ class BadputTest(googletest.TestCase):
           delta=0.1,
       )
 
+  def _record_steps_at(self, t0, step_offsets):
+    """Records step start times at `t0 + seconds` for `(step, seconds)` pairs."""
+    for step, seconds in step_offsets:
+      self.goodput_recorder.record_step_start_time(
+          step, t0 + datetime.timedelta(seconds=seconds)
+      )
+
+  def _record_custom_badput_event(self, t0, start_seconds, end_seconds):
+    """Records an `eval` custom badput event at offsets (seconds) from `t0`."""
+    self.goodput_recorder.record_custom_badput_event_start_time(
+        t0 + datetime.timedelta(seconds=start_seconds), 'eval'
+    )
+    self.goodput_recorder.record_custom_badput_event_end_time(
+        t0 + datetime.timedelta(seconds=end_seconds), 'eval'
+    )
+
+  def test_get_step_times_excludes_custom_badput_event(self):
+    """Validates a custom badput event inside a step is excluded from its time."""
+    t0 = _TEST_JOB_START_TIME
+    self._record_steps_at(t0, [(0, 0), (1, 10), (2, 20)])
+    # A 25s eval inside step 2 (t=20s to t=55s) makes its raw delta 35s.
+    self._record_custom_badput_event(t0, 25, 50)
+    self._record_steps_at(t0, [(3, 55), (4, 65)])
+
+    step_times = self.goodput_calculator._get_step_times(
+        self.mock_cloud_logger.entries
+    )
+    self.assertEqual(step_times, {0: 10.0, 1: 10.0, 2: 10.0, 3: 10.0})
+
+  def test_get_step_times_ignores_partially_overlapping_custom_badput_event(
+      self,
+  ):
+    """Validates only custom badput events fully inside a step are excluded."""
+    t0 = _TEST_JOB_START_TIME
+    self._record_steps_at(t0, [(0, 0), (1, 10)])
+    # Fully inside step 1 (t=10s to t=20s): excluded.
+    self._record_custom_badput_event(t0, 12, 15)
+    self._record_steps_at(t0, [(2, 20)])
+    # Starts inside step 2 (t=20s to t=30s) and ends inside step 3 (t=30s to
+    # t=40s): not fully inside either window, so excluded from neither.
+    self._record_custom_badput_event(t0, 25, 35)
+    self._record_steps_at(t0, [(3, 30), (4, 40), (5, 50)])
+
+    step_times = self.goodput_calculator._get_step_times(
+        self.mock_cloud_logger.entries
+    )
+    self.assertEqual(
+        step_times, {0: 10.0, 1: 7.0, 2: 10.0, 3: 10.0, 4: 10.0}
+    )
+
+  def test_get_step_times_excludes_custom_badput_event_and_checkpoint_save(
+      self,
+  ):
+    """Validates both a custom badput event and a checkpoint save are excluded."""
+    t0 = _TEST_JOB_START_TIME
+    self._record_steps_at(t0, [(0, 0), (1, 10)])
+    # Step 1 (t=10s to t=28s): 10s compute + 5s eval + 3s blocking save.
+    self._record_custom_badput_event(t0, 12, 17)
+    self.mock_cloud_logger.write_cloud_logging_entry(
+        asdict(
+            MockSaveStepStatistics(
+                step=1,
+                event_type='save',
+                directory='gs://bucket/path',
+                checkpoint_manager_blocking_start_time=(
+                    t0 + datetime.timedelta(seconds=18)
+                ).timestamp(),
+                checkpoint_manager_blocking_duration_secs=3.0,
+                synchronous=True,
+            )
+        )
+    )
+    self._record_steps_at(t0, [(2, 28), (3, 38)])
+
+    step_times = self.goodput_calculator._get_step_times(
+        self.mock_cloud_logger.entries
+    )
+    self.assertEqual(step_times, {0: 10.0, 1: 10.0, 2: 10.0})
+
+  def test_get_step_deviation_excludes_custom_badput_event(self):
+    """Validates a custom badput event does not inflate the step deviation."""
+    t0 = _TEST_JOB_START_TIME
+    self.goodput_recorder.record_job_start_time(t0)
+    self._record_steps_at(
+        t0, [(0, 0), (1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]
+    )
+    # A 25s eval inside step 5 (t=50s to t=85s).
+    self._record_custom_badput_event(t0, 52, 77)
+    self._record_steps_at(t0, [(6, 85), (7, 95), (8, 105), (9, 115)])
+    self.goodput_recorder.record_job_end_time(
+        t0 + datetime.timedelta(seconds=125)
+    )
+
+    step_deviations = self.goodput_calculator.get_step_deviation()
+
+    self.assertEqual(sorted(step_deviations), list(range(9)))
+    for step, deviation in step_deviations.items():
+      self.assertAlmostEqual(deviation, 0.0, msg=f'step {step}')
+    self.assertAlmostEqual(
+        self.goodput_calculator._goodput_cache.get_step_info().ideal_step_time,
+        10.0,
+    )
+
   def test_badput_calculator_custom_sync_badput(self):
     """Test function to validate unknown badput bucket."""
 

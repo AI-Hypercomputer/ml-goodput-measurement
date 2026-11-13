@@ -188,6 +188,34 @@ def train_loop(config, state=None):
 consistent (e.g., "eval_step", "sdc_check"), to ensure accurate aggregation and
 reporting in badput breakdowns.
 
+### Record Checkpoint Save and Restore Time (non-Orbax checkpointers)
+
+Orbax writes checkpoint save and restore statistics to the goodput log itself.
+If you checkpoint with another framework (for example PyTorch Distributed
+Checkpoint), record them with:
+
+- `record_checkpoint_save_stats(...)` once per saving step, with the time the
+  training loop was blocked (and optionally its breakdown).
+- `record_checkpoint_restore_stats(...)` once per restore.
+
+They are reported as `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` and
+`UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`. Timestamps are UTC POSIX seconds; write
+at most one save entry per step, because entries for the same step are averaged.
+Both methods raise `ValueError` on a non-positive duration, so skip the call
+when nothing blocked.
+
+```python
+start = time.time()
+checkpointer.save(step)  # blocks the training loop
+goodput_recorder.record_checkpoint_save_stats(
+    step=step,
+    directory=checkpoint_dir,  # a gs:// path counts as a persistent save
+    checkpoint_manager_blocking_start_time=start,
+    checkpoint_manager_blocking_duration_secs=time.time() - start,
+    synchronous=True,
+)
+```
+
 See also: [Badput types](badput.md),
 [PyTorch and asynchronous backends](pytorch.md),
 [Troubleshooting](troubleshooting.md).

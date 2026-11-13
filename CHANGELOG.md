@@ -21,6 +21,17 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
+## [Unreleased]
+
+### Added
+
+* `GoodputRecorder.record_checkpoint_save_stats(...)` and
+  `record_checkpoint_restore_stats(...)`: public methods that write the same
+  checkpoint entries Orbax writes, so non-Orbax checkpointers (for example
+  PyTorch Distributed Checkpoint) can report
+  `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` / `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`.
+  They replace the no-op `record_checkpoint_progress` stub.
+
 ## [0.2.5] - 2026-11-12
 
 ### Fixed
@@ -220,6 +231,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
+[Unreleased]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.5...HEAD
 [0.2.5]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.2...v0.2.3

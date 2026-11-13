@@ -20,3 +20,4 @@ from cloud_goodput.ml_goodput_measurement.src import goodput_elastic
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
 from cloud_goodput.ml_goodput_measurement.src import monitoring
 from cloud_goodput.ml_goodput_measurement.src import monitoring_elastic
+from cloud_goodput.ml_goodput_measurement.src import step_clock

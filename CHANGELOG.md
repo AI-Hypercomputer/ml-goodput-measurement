@@ -21,15 +21,38 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 -->
 
-## [Unreleased]
+## [0.2.5] - 2026-11-12
 
 ### Fixed
 
+* The monitor no longer freezes after a job restarts on the same host: a cache
+  left by an earlier process is resumed from its local cursor, and a cached
+  timeline without a usable cursor is read again instead of never fetching new
+  entries. This was the remaining cause of the Goodput drop after a JobSet
+  restart that 0.2.4 claimed to fix.
 * Cloud Logging entries that become visible after the read cursor passed their
   timestamp are read now (overlap window with `insertId` de-duplication; see
-  `read_overlap_seconds` and `read_lag_seconds`).
-* A cached timeline without a usable cursor is read again instead of never
-  fetching new entries.
+  `read_overlap_seconds` and `read_lag_seconds`), so live Goodput is no longer
+  inflated by skipped checkpoint or badput entries.
+* A checkpoint restore that runs inside a training-preparation interval is
+  counted once; repeated restores of the same step are separate intervals.
+* `PROGRAM_STARTUP` charges every anomalous step in the startup window, not
+  only the slowest one.
+* Custom badput events (such as evaluation) inside a step no longer inflate
+  that step's time in the step deviation and ideal step time.
+
+### Added
+
+* `StepClock`: training-step boundaries from accelerator completion events for
+  asynchronous backends (PyTorch on TPU or GPU), with host-time fallback.
+* `GoodputRecorder.flush(timeout_s=...)` and
+  `GoodputMonitor(wait_for_job_end_seconds=...)`, so the final flush can wait,
+  bounded, for the `job_end_time` entry and credit the last step.
+* `GoodputCalculator(min_step_time=...)`, forwarded by `GoodputMonitor`, so
+  workloads with sub-second steps get an ideal step time and step deviation;
+  `configured_ideal_step_time` is forwarded to the calculator.
+* Goodput computation is linear in the number of steps (custom badput lookup
+  indexed by start time).
 
 ## [0.2.4] - 2026-11-09
 
@@ -41,8 +64,8 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   time is deducted per step before `PROGRAM_STARTUP`; a post-restart segment
   with a single completed step falls back to historical step times; `None`
   checkpoint durations no longer fail the query. Fixes the
-  "Productive training time is invalid" error and the Goodput drop after a
-  JobSet restart.
+  "Productive training time is invalid" error after a JobSet restart (the
+  Goodput drop after the restart is fixed in 0.2.5).
 * Elastic restart detection during jump-forward rollbacks and sequential
   restarts.
 
@@ -197,7 +220,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Initial release of ML Goodput Measurement PyPi package
 * Feature: Contains the Goodput module which allows logging and retrieval of training job's overall productive Goodput
 
-[Unreleased]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.4...HEAD
+[0.2.5]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/AI-Hypercomputer/ml-goodput-measurement/compare/v0.2.0...v0.2.2

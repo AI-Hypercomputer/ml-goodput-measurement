@@ -16,8 +16,11 @@
 # ML Goodput Measurement
 
 <!-- NEWS START -->
-## 🔥 Latest news 🔥
+## Releases
 
+- [November 12, 2026] **Release v0.2.5**: Monitor no longer freezes after a
+  restart on the same host; late-visible log entries are read; StepClock,
+  bounded final flush, `min_step_time`.
 - [November 9, 2026] **Release v0.2.4**: Elastic restart and checkpoint
   calculation fixes; custom badput events in the last step are counted.
 - [August 14, 2026] **Release v0.2.3**: Introduced a GCS Cache Sync to speed up cold start reads.

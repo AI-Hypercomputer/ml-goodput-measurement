@@ -26,40 +26,6 @@ def _parse_timestamp(value: str) -> datetime.datetime:
   return datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
 
 
-def _chronological(entries: list[Any]) -> list[Any]:
-  """Sorts entries by their own timestamps.
-
-  The calculator replays the timeline as a sequential state machine, so an
-  entry that was read late (see `_CloudLogger.read_new_entries`) has to move to
-  its chronological position. The sort is stable; an entry without a timestamp
-  keeps its position by reusing the previous entry's key. Orbax save and
-  restore entries sort by their start time instead of their log time, which is
-  harmless because the calculator extracts checkpoint events separately
-  (`_extract_checkpoint_save_events`, `_extract_restore_intervals`,
-  `CheckpointBadputCalculator`) and matches them to steps by time window.
-
-  Args:
-    entries: Entry payloads in the order they were appended to the timeline.
-
-  Returns:
-    The same entries in chronological order.
-  """
-  keys = []
-  previous_key = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-  for entry in entries:
-    timestamp = (
-        goodput_utils.get_timestamp_from_log_entry(entry)
-        if isinstance(entry, dict)
-        else None
-    )
-    if timestamp is not None:
-      previous_key = timestamp
-    keys.append(previous_key)
-  return [
-      entry for _, entry in sorted(zip(keys, entries), key=lambda pair: pair[0])
-  ]
-
-
 class GoodputCache:
   """Goodput Cache backed by local file and GCS."""
 
@@ -311,7 +277,7 @@ class GoodputCache:
               entries.append(json.loads(line))
       except Exception as e:  # pylint: disable=broad-exception-caught
         print(f'Error reading timeline file: {e}')
-    return _chronological(entries)
+    return goodput_utils.sort_chronologically(entries)
 
   def get_step_entries(self) -> list[Any]:
     """Loads and filters step entries from disk, in chronological order."""
@@ -326,7 +292,7 @@ class GoodputCache:
                 step_entries.append(entry)
       except Exception as e:  # pylint: disable=broad-exception-caught
         print(f'Error reading step entries from file: {e}')
-    return _chronological(step_entries)
+    return goodput_utils.sort_chronologically(step_entries)
 
   def get_goodput_info(self) -> Optional[GoodputInfo]:
     """Returns the last computed Goodput information."""

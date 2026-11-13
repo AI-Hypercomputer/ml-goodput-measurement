@@ -23,6 +23,11 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 ## [Unreleased]
 
+### Fixed
+
+* Interval (rolling-window) queries read late-visible entries with the same
+  overlap window and insertId de-duplication as cumulative queries.
+
 ### Added
 
 * `GoodputRecorder.record_checkpoint_save_stats(...)` and

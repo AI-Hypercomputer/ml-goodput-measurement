@@ -48,11 +48,16 @@ class MockCloudLogger:
     ], self.last_entry_info
 
   def read_new_entries(
-      self, last_entry_info, end_time, overlap_seconds, known_entry_ids
+      self,
+      last_entry_info,
+      end_time,
+      overlap_seconds,
+      known_entry_ids,
+      start_time=None,
   ):
     """Mirrors `_CloudLogger.read_new_entries` over the in-memory entries."""
     cursor_ts, cursor_id = last_entry_info or (None, None)
-    window_start = None
+    window_start = _to_aware(start_time)
     if cursor_ts is not None:
       window_start = _to_aware(cursor_ts) - datetime.timedelta(
           seconds=overlap_seconds

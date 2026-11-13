@@ -377,6 +377,38 @@ def get_timestamp_from_log_entry(
   return None
 
 
+def sort_chronologically(entries: list[Any]) -> list[Any]:
+  """Sorts entries by their own timestamps.
+
+  The calculator replays the timeline as a sequential state machine, so an
+  entry that was read late (see `_CloudLogger.read_new_entries`) has to move to
+  its chronological position. The sort is stable; an entry without a timestamp
+  keeps its position by reusing the previous entry's key. Orbax save and
+  restore entries sort by their start time instead of their log time, which is
+  harmless because the calculator extracts checkpoint events separately
+  (`_extract_checkpoint_save_events`, `_extract_restore_intervals`,
+  `CheckpointBadputCalculator`) and matches them to steps by time window.
+
+  Args:
+    entries: Entry payloads in the order they were appended to the timeline.
+
+  Returns:
+    The same entries in chronological order.
+  """
+  keys = []
+  previous_key = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+  for entry in entries:
+    timestamp = (
+        get_timestamp_from_log_entry(entry) if isinstance(entry, dict) else None
+    )
+    if timestamp is not None:
+      previous_key = timestamp
+    keys.append(previous_key)
+  return [
+      entry for _, entry in sorted(zip(keys, entries), key=lambda pair: pair[0])
+  ]
+
+
 def get_gcp_metadata(category: str, attribute: str, timeout=5, retries=3):
   """Fetch the specified attribute from GCP metadata server.
 

@@ -37,6 +37,12 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` / `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`.
   They replace the no-op `record_checkpoint_progress` stub.
 
+### Fixed
+
+* Interval (rolling-window) queries read late-visible entries with the same
+  overlap window and `insertId` de-duplication as cumulative queries, and keep
+  the window's entries in chronological order however the window was read.
+
 ## [0.2.5] - 2026-11-12
 
 ### Fixed

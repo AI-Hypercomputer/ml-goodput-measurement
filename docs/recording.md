@@ -201,8 +201,8 @@ Checkpoint), record them with:
 They are reported as `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` and
 `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`. Timestamps are UTC POSIX seconds; write
 at most one save entry per step, because entries for the same step are averaged.
-Both methods raise `ValueError` on a non-positive duration, so skip the call
-when nothing blocked.
+Both methods log a warning and drop the entry on a non-positive duration, so
+skip the call when nothing blocked.
 
 ```python
 start = time.time()

@@ -50,10 +50,13 @@ days). Reduce it for large or long-running jobs if queries time out.
 ## Checkpoint Badput is zero
 
 `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` and `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`
-are reported only when Orbax is used with its structured logger configured.
-For other checkpointers, wrap the blocking part of the save in a
-[custom badput event](recording.md#record-custom-badput-events-eg-evaluation-sdc-checks);
-do not do both.
+come from checkpoint entries in the goodput log. Orbax writes them when its
+structured logger is configured; other checkpointers record them with
+`record_checkpoint_save_stats` and `record_checkpoint_restore_stats` (see
+[Record checkpoint save and restore time](recording.md#record-checkpoint-save-and-restore-time-non-orbax-checkpointers)).
+On releases without these methods, wrap the blocking part of the save in a
+[custom badput event](recording.md#record-custom-badput-events-eg-evaluation-sdc-checks)
+instead. Use one of the two for a given save, not both.
 
 See also: [Recording intervals](recording.md), [Monitoring](monitoring.md),
 [Badput types](badput.md).

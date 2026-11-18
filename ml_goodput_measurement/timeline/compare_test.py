@@ -145,7 +145,7 @@ def _jobset_create(name, *jobs):
 # worker job (2 slices of 256 pods with 4 chips). Numbers are floats and the
 # TPU limit a string, as in the audit log.
 _PATHWAYS_CREATE = _jobset_create(
-    'pw-no-2x1k-1',
+    'pw-restart-2x1k-1',
     _replicated_job(
         'pathways-head',
         1.0,
@@ -179,10 +179,10 @@ class PhaseGroupTest(absltest.TestCase):
 class SpecTest(absltest.TestCase):
 
   def test_parse_shape(self):
-    self.assertEqual(compare.parse_shape('pw-no-4x1k-0822-2'), '4\u00d71k')
-    self.assertEqual(compare.parse_shape('abhi-2x1k-0825-01'), '2\u00d71k')
-    self.assertEqual(compare.parse_shape('snp-3x4-race-before'), '3\u00d74')
-    self.assertEqual(compare.parse_shape('logger_pr18_mode2_pnr_ckpt'), '')
+    self.assertEqual(compare.parse_shape('restart-4x1k-0110-2'), '4\u00d71k')
+    self.assertEqual(compare.parse_shape('user-2x1k-0110-01'), '2\u00d71k')
+    self.assertEqual(compare.parse_shape('snapshot-3x4-1'), '3\u00d74')
+    self.assertEqual(compare.parse_shape('long_snake_case_run_id'), '')
     self.assertEqual(compare.parse_shape('box2x1kx'), '')
 
   def test_config_from_dict(self):
@@ -191,7 +191,7 @@ class SpecTest(absltest.TestCase):
             'title': 'Recovery anatomy',
             'description': 'Three recovery modes.',
             'project_id': 'proj',
-            'start_time': '2026-08-01T00:00:00Z',
+            'start_time': '2026-01-01T00:00:00Z',
             'groups': [
                 {'name': 'Fuji-70B', 'description': '2× v5p-128'},
                 'Fuji-7B',
@@ -203,7 +203,7 @@ class SpecTest(absltest.TestCase):
                     'label': 'B',
                     'group': 'Fuji-70B',
                     'timeline_url': 'wl-b.html',
-                    'start_time': '2026-08-02T00:00:00Z',
+                    'start_time': '2026-01-02T00:00:00Z',
                     'entries_path': 'b.json',
                     'note': 'Shorter run.',
                 },
@@ -224,12 +224,12 @@ class SpecTest(absltest.TestCase):
     a, b = config.workloads
     self.assertEqual(a.workload_id, 'wl-a')
     self.assertEqual(a.project_id, 'proj')
-    self.assertEqual(a.start_time, '2026-08-01T00:00:00Z')
+    self.assertEqual(a.start_time, '2026-01-01T00:00:00Z')
     self.assertEqual(a.group, '')
     self.assertEqual(b.label, 'B')
     self.assertEqual(b.group, 'Fuji-70B')
     self.assertEqual(b.timeline_url, 'wl-b.html')
-    self.assertEqual(b.start_time, '2026-08-02T00:00:00Z')
+    self.assertEqual(b.start_time, '2026-01-02T00:00:00Z')
     self.assertEqual(b.entries_path, '/configs/b.json')
     self.assertEqual(b.note, 'Shorter run.')
 
@@ -330,7 +330,7 @@ class SpecTest(absltest.TestCase):
 
 
 def _timed(
-    entries: list[dict[str, object]], start: str = '2026-08-01T00:00:00+00:00'
+    entries: list[dict[str, object]], start: str = '2026-01-01T00:00:00+00:00'
 ) -> list[tuple[str, dict[str, object]]]:
   """Pairs (timestamp, payload) a minute apart, like fetch_log_entries."""
   t0 = datetime.datetime.fromisoformat(start)
@@ -354,7 +354,7 @@ class LoadEntriesTest(absltest.TestCase):
   def test_fetch_uses_cache_for_same_query(self):
     cache_dir = self.create_tempdir().full_path
     spec = compare.WorkloadSpec(
-        workload_id='wl', start_time='2026-08-01T00:00:00Z'
+        workload_id='wl', start_time='2026-01-01T00:00:00Z'
     )
     with mock.patch.object(
         compare.log_fetcher,
@@ -363,9 +363,9 @@ class LoadEntriesTest(absltest.TestCase):
     ) as fetch:
       first = compare.load_entries(spec, 'proj', cache_dir=cache_dir)
       second = compare.load_entries(spec, 'proj', cache_dir=cache_dir)
-      fetch.assert_called_once_with('proj', 'wl', '2026-08-01T00:00:00Z', None)
+      fetch.assert_called_once_with('proj', 'wl', '2026-01-01T00:00:00Z', None)
       # An earlier start time is not in the cache, so it is fetched again.
-      spec.start_time = '2026-07-31T00:00:00Z'
+      spec.start_time = '2025-12-31T00:00:00Z'
       compare.load_entries(spec, 'proj', cache_dir=cache_dir)
       self.assertEqual(fetch.call_count, 2)
     self.assertEqual(first, _SINGLE_RUN)
@@ -380,7 +380,7 @@ class LoadEntriesTest(absltest.TestCase):
     cache_dir = self.create_tempdir()
     cache_dir.create_file('wl.json', content='{"query": ')  # Truncated.
     spec = compare.WorkloadSpec(
-        workload_id='wl', start_time='2026-08-01T00:00:00Z'
+        workload_id='wl', start_time='2026-01-01T00:00:00Z'
     )
     with mock.patch.object(
         compare.log_fetcher,
@@ -403,7 +403,7 @@ class LoadEntriesTest(absltest.TestCase):
     # The cache directory cannot be created below a regular file.
     blocker = self.create_tempfile('blocker')
     spec = compare.WorkloadSpec(
-        workload_id='wl', start_time='2026-08-01T00:00:00Z'
+        workload_id='wl', start_time='2026-01-01T00:00:00Z'
     )
     with mock.patch.object(
         compare.log_fetcher,
@@ -419,8 +419,8 @@ class LoadEntriesTest(absltest.TestCase):
     cache_dir = self.create_tempdir().full_path
     spec = compare.WorkloadSpec(
         workload_id='wl',
-        start_time='2026-08-01T00:00:00Z',
-        end_time='2026-08-01T01:00:00Z',
+        start_time='2026-01-01T00:00:00Z',
+        end_time='2026-01-01T01:00:00Z',
     )
     # Entries at 00:00, 00:01, ..., 00:04.
     with mock.patch.object(
@@ -432,8 +432,8 @@ class LoadEntriesTest(absltest.TestCase):
       # From 00:01 (in another time zone) to 00:03, both included.
       narrower = dataclasses.replace(
           spec,
-          start_time='2026-07-31T17:01:00-07:00',
-          end_time='2026-08-01T00:03:00Z',
+          start_time='2025-12-31T17:01:00-07:00',
+          end_time='2026-01-01T00:03:00Z',
       )
       self.assertEqual(
           compare.load_entries(narrower, 'proj', cache_dir=cache_dir),
@@ -447,20 +447,20 @@ class LoadEntriesTest(absltest.TestCase):
       )
       fetch.assert_called_once()
       # A later end time is not in the cache.
-      later = dataclasses.replace(spec, end_time='2026-08-01T02:00:00Z')
+      later = dataclasses.replace(spec, end_time='2026-01-01T02:00:00Z')
       compare.load_entries(later, 'proj', cache_dir=cache_dir)
       self.assertEqual(fetch.call_count, 2)
     # The new time range replaces the cached one.
     with open(os.path.join(cache_dir, 'wl.json'), encoding='utf-8') as f:
       cached = json.load(f)
-    self.assertEqual(cached['query']['end_time'], '2026-08-01T02:00:00Z')
+    self.assertEqual(cached['query']['end_time'], '2026-01-01T02:00:00Z')
     self.assertEqual(cached['timestamps'], [t for t, _ in _timed(_SINGLE_RUN)])
     self.assertEqual(cached['entries'], _SINGLE_RUN)
 
   def test_refresh_fetches_again(self):
     cache_dir = self.create_tempdir().full_path
     spec = compare.WorkloadSpec(
-        workload_id='wl', start_time='2026-08-01T00:00:00Z'
+        workload_id='wl', start_time='2026-01-01T00:00:00Z'
     )
     with mock.patch.object(
         compare.log_fetcher,
@@ -482,8 +482,8 @@ class LoadEntriesTest(absltest.TestCase):
     cache_dir = self.create_tempdir().full_path
     spec = compare.WorkloadSpec(
         workload_id='wl',
-        start_time='2026-08-01T00:00:00Z',
-        end_time='2026-08-01T01:00:00Z',
+        start_time='2026-01-01T00:00:00Z',
+        end_time='2026-01-01T01:00:00Z',
     )
     with mock.patch.object(
         compare.log_fetcher, 'fetch_log_entries', return_value=[]
@@ -499,8 +499,8 @@ class LoadEntriesTest(absltest.TestCase):
     query = {
         'project_id': 'proj',
         'workload_id': 'wl',
-        'start_time': '2026-08-01T00:00:00Z',
-        'end_time': '2026-08-01T01:00:00Z',
+        'start_time': '2026-01-01T00:00:00Z',
+        'end_time': '2026-01-01T01:00:00Z',
     }
     cache_dir = self.create_tempdir()
     cache_dir.create_file(
@@ -521,7 +521,7 @@ class LoadEntriesTest(absltest.TestCase):
           _SINGLE_RUN,
       )
       fetch.assert_not_called()
-      spec.end_time = '2026-08-01T00:30:00Z'
+      spec.end_time = '2026-01-01T00:30:00Z'
       compare.load_entries(spec, 'proj', cache_dir=cache_dir.full_path)
       fetch.assert_called_once()
 
@@ -603,7 +603,7 @@ class JobSetTest(absltest.TestCase):
     self.assertEqual(
         info,
         compare.JobSetInfo(
-            name='pw-no-2x1k-1',
+            name='pw-restart-2x1k-1',
             model_name='llama3.1-405b',
             slices=2,
             chips_per_slice=1024,
@@ -621,7 +621,7 @@ class JobSetTest(absltest.TestCase):
     args = ['--megascale_num_slices=2', '--model_name="llama3.1-8b"']
     info = compare.parse_jobset_request(
         _jobset_create(
-            'ubench-1',
+            'mcjax-1',
             _replicated_job(
                 'slice-job', 2.0, 16.0, [_container('jax-tpu', args, tpu=4.0)]
             ),
@@ -629,7 +629,7 @@ class JobSetTest(absltest.TestCase):
     )
     self.assertEqual(
         (info.name, info.model_name, info.shape),
-        ('ubench-1', 'llama3.1-8b', '2\u00d764'),
+        ('mcjax-1', 'llama3.1-8b', '2\u00d764'),
     )
 
   def test_model_name_is_a_whole_key(self):
@@ -699,7 +699,7 @@ class JobSetTest(absltest.TestCase):
     self.assertEqual(compare.jobset_warnings(spec, jobset), [])
 
   def test_first_event_time(self):
-    t = datetime.datetime(2026, 8, 20, 19, 57, 1, tzinfo=datetime.timezone.utc)
+    t = datetime.datetime(2026, 1, 20, 19, 57, 1, tzinfo=datetime.timezone.utc)
     entries = [
         {'step_count': 0, 'step_start_time': t.timestamp() + 60},
         {'job_start_time': str(t.timestamp())},  # Numeric strings count too.
@@ -711,9 +711,9 @@ class JobSetTest(absltest.TestCase):
 
   def test_load_jobset_window_and_cache(self):
     cache_dir = self.create_tempdir().full_path
-    spec = compare.WorkloadSpec(workload_id='no-2x1k-1')
+    spec = compare.WorkloadSpec(workload_id='restart-2x1k-1')
     utc = datetime.timezone.utc
-    first_event = datetime.datetime(2026, 8, 20, 19, 57, tzinfo=utc)
+    first_event = datetime.datetime(2026, 1, 20, 19, 57, tzinfo=utc)
     with mock.patch.object(
         compare.log_fetcher,
         'fetch_jobset_create',
@@ -726,9 +726,9 @@ class JobSetTest(absltest.TestCase):
     # From 2 days before to 10 minutes after the first goodput event.
     fetch.assert_called_once_with(
         'proj',
-        'no-2x1k-1',
-        datetime.datetime(2026, 8, 18, 19, 57, tzinfo=utc),
-        datetime.datetime(2026, 8, 20, 20, 7, tzinfo=utc),
+        'restart-2x1k-1',
+        datetime.datetime(2026, 1, 18, 19, 57, tzinfo=utc),
+        datetime.datetime(2026, 1, 20, 20, 7, tzinfo=utc),
     )
     self.assertEqual(info.shape, '2\u00d71k')
     self.assertEqual(cached, info)
@@ -743,12 +743,13 @@ class JobSetTest(absltest.TestCase):
         )
     fetch.assert_called_once()
     self.assertCountEqual(
-        os.listdir(cache_dir), ['no-2x1k-1.jobset.json', 'other.jobset.json']
+        os.listdir(cache_dir),
+        ['restart-2x1k-1.jobset.json', 'other.jobset.json'],
     )
 
   def test_load_workloads_looks_up_jobsets(self):
     t0 = datetime.datetime(
-        2026, 8, 20, 19, 57, tzinfo=datetime.timezone.utc
+        2026, 1, 20, 19, 57, tzinfo=datetime.timezone.utc
     ).timestamp()
     entries = [
         {'job_start_time': t0},
@@ -784,16 +785,20 @@ class JobSetTest(absltest.TestCase):
     self.assertEqual(
         ok.messages,
         [
-            'JobSet pw-no-2x1k-1: llama3.1-405b, 2×1k (2 slices × 1,024'
-            ' chips, tpu7x)',
-            "WARNING: model 'Llama-3.1-8B' in the config differs from the"
-            " JobSet's model_name 'llama3.1-405b'; showing 'Llama-3.1-8B'.",
+            (
+                'JobSet pw-restart-2x1k-1: llama3.1-405b, 2×1k (2 slices ×'
+                ' 1,024 chips, tpu7x)'
+            ),
+            (
+                "WARNING: model 'Llama-3.1-8B' in the config differs from the"
+                " JobSet's model_name 'llama3.1-405b'; showing 'Llama-3.1-8B'."
+            ),
         ],
     )
     self.assertIsNone(missing.jobset)
     self.assertIn(
         'No JobSet create entry in the 2 days before the first goodput event'
-        ' (2026-08-20 19:57Z)',
+        ' (2026-01-20 19:57Z)',
         missing.messages[0],
     )
     # A failed lookup does not skip the workload.
@@ -804,9 +809,9 @@ class JobSetTest(absltest.TestCase):
     self.assertEqual(not_looked_up.messages, [])
 
   def test_load_jobset_retries_quota_errors(self):
-    spec = compare.WorkloadSpec(workload_id='no-2x1k-1')
+    spec = compare.WorkloadSpec(workload_id='restart-2x1k-1')
     first_event = datetime.datetime(
-        2026, 8, 20, 19, 57, tzinfo=datetime.timezone.utc
+        2026, 1, 20, 19, 57, tzinfo=datetime.timezone.utc
     )
     fetch = mock.Mock(
         side_effect=[RuntimeError('429 Quota exceeded'), _PATHWAYS_CREATE]
@@ -823,7 +828,7 @@ class JobSetTest(absltest.TestCase):
   def test_refresh_reads_logs_and_jobsets_again(self):
     cache_dir = self.create_tempdir().full_path
     t0 = datetime.datetime(
-        2026, 8, 20, 19, 57, tzinfo=datetime.timezone.utc
+        2026, 1, 20, 19, 57, tzinfo=datetime.timezone.utc
     ).timestamp()
     entries = [
         {'job_start_time': t0},
@@ -831,7 +836,7 @@ class JobSetTest(absltest.TestCase):
     ]
     specs = [
         compare.WorkloadSpec(
-            workload_id='no-2x1k-1', start_time='2026-08-20T00:00:00Z'
+            workload_id='restart-2x1k-1', start_time='2026-01-20T00:00:00Z'
         )
     ]
     with (
@@ -865,7 +870,7 @@ class SummaryTest(absltest.TestCase):
   def test_summarize_workload(self):
     s = compare.summarize_workload(
         _recovery_entries(),
-        compare.WorkloadSpec(workload_id='pw-a-2x1k-1', label='A'),
+        compare.WorkloadSpec(workload_id='run-a-2x1k-1', label='A'),
     )
     self.assertEqual(s.label, 'A')
     self.assertEqual(s.shape, '2\u00d71k')
@@ -950,7 +955,7 @@ class SummaryTest(absltest.TestCase):
     # Without a model in the config, model_name is shown.
     s = compare.summarize_workload(
         list(_SINGLE_RUN),
-        compare.WorkloadSpec(workload_id='ubench-1'),
+        compare.WorkloadSpec(workload_id='mcjax-1'),
         jobset=jobset,
     )
     self.assertEqual(s.group, 'llama3.1-405b \u00b7 2\u00d71k')
@@ -976,16 +981,16 @@ class RenderTest(absltest.TestCase):
         compare.summarize_workload(
             _recovery_entries(),
             compare.WorkloadSpec(
-                workload_id='pw-no-4x1k-1',
+                workload_id='restart-4x1k-1',
                 label='Restart',
                 model='Llama-405B',
-                timeline_url='runs/pw-no-4x1k-1.html',
+                timeline_url='runs/restart-4x1k-1.html',
             ),
         ),
         compare.summarize_workload(
             _recovery_entries(scale=2.0),
             compare.WorkloadSpec(
-                workload_id='pw-rr-4x1k-2',
+                workload_id='resize-4x1k-2',
                 label='Resize',
                 model='Llama-405B',
                 note='Shorter run.',
@@ -1011,7 +1016,7 @@ class RenderTest(absltest.TestCase):
     self.assertEqual([g.name for g in groups], [_GROUP, 'Other'])
     self.assertEqual(
         [s.workload_id for s in groups[0].summaries],
-        ['pw-no-4x1k-1', 'pw-rr-4x1k-2'],
+        ['restart-4x1k-1', 'resize-4x1k-2'],
     )
     self.assertEqual(groups[1].summaries, [self.summaries[2]])
     # Configured groups come first, in the config order, with descriptions.
@@ -1143,7 +1148,7 @@ class RenderTest(absltest.TestCase):
         ValueError, re.escape(f'"baseline": true in group {_GROUP!r}')
     ):
       compare.group_summaries(self.summaries)
-    with self.assertRaisesRegex(ValueError, 'pw-no-4x1k-1, pw-rr-4x1k-2'):
+    with self.assertRaisesRegex(ValueError, 'restart-4x1k-1, resize-4x1k-2'):
       compare.check_baselines(self.summaries)
 
   def test_baseline_note(self):
@@ -1310,7 +1315,7 @@ class RenderTest(absltest.TestCase):
         '<td class="model"><b>\u2014</b></td><td>wl-single</td>', page
     )
     self.assertIn(
-        '<a href="runs/pw-no-4x1k-1.html" target="_blank">pw-no-4x1k-1</a>',
+        '<a href="runs/restart-4x1k-1.html" target="_blank">restart-4x1k-1</a>',
         page,
     )
     self.assertIn(
@@ -1357,9 +1362,11 @@ class RenderTest(absltest.TestCase):
     self.assertIn('<title>Goodput Cross-Run Comparison</title>', page)
 
   def test_long_workload_id_can_wrap(self):
-    s = dataclasses.replace(self.summaries[2], workload_id='logger_pr18_mode2')
+    s = dataclasses.replace(self.summaries[2], workload_id='long_snake_case_id')
     page = compare.to_comparison_html([s], include_plotlyjs=False)
-    self.assertIn('<td class="mono wl">logger_<wbr>pr18_<wbr>mode2</td>', page)
+    self.assertIn(
+        '<td class="mono wl">long_<wbr>snake_<wbr>case_<wbr>id</td>', page
+    )
 
   def test_csv(self):
     path = os.path.join(self.create_tempdir().full_path, 'cmp.csv')
@@ -1373,7 +1380,7 @@ class RenderTest(absltest.TestCase):
     self.assertEqual(
         [r['is_group_baseline'] for r in rows], ['True', 'False', 'True']
     )
-    self.assertEqual(rows[0]['timeline_url'], 'runs/pw-no-4x1k-1.html')
+    self.assertEqual(rows[0]['timeline_url'], 'runs/restart-4x1k-1.html')
     self.assertEqual(rows[0]['shape'], '4\u00d71k')
     self.assertAlmostEqual(float(rows[0]['baseline_step_time_s']), 10.0)
     self.assertAlmostEqual(float(rows[0]['mean_mttr_s']), 65.0)

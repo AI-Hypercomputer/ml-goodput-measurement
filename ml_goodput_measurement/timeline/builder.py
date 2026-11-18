@@ -3,9 +3,9 @@
 import dataclasses
 from typing import Any
 
-from . import event_parser
-from . import events
-from . import step_times
+from cloud_goodput.ml_goodput_measurement.timeline import event_parser
+from cloud_goodput.ml_goodput_measurement.timeline import events
+from cloud_goodput.ml_goodput_measurement.timeline import step_times
 
 # Alias for convenience
 EventType = events.EventType
@@ -65,6 +65,13 @@ def _subtract_intervals(
   if curr < window_end - 1e-3:
     remaining.append((curr, window_end))
   return remaining
+
+
+def _step_end(
+    pairs: list[tuple[int, float]], i: int, last_end: float
+) -> float:
+  """End of the i-th step in `pairs`: the next step's start, else `last_end`."""
+  return pairs[i + 1][1] if i + 1 < len(pairs) else last_end
 
 
 def build_timeline(parsed: event_parser.ParsedLogs) -> list[Segment]:
@@ -436,19 +443,12 @@ def build_timeline(parsed: event_parser.ParsedLogs) -> list[Segment]:
           wasted_start, wasted_end, [(s.start, s.end) for s in run_jit_segs]
       )
 
-      def _step_end(i: int) -> float:
-        if i + 1 < len(repeated_pairs):
-          return repeated_pairs[i + 1][1]
-        elif productive_pairs:
-          return productive_pairs[0][1]
-        else:
-          return step_block_end
-
       for seg_st, seg_ed in lost_intervals:
         steps_in_seg = [
             sn
             for idx, (sn, ts) in enumerate(repeated_pairs)
-            if max(ts, seg_st) < min(_step_end(idx), seg_ed) - 1e-3
+            if max(ts, seg_st)
+            < min(_step_end(repeated_pairs, idx, wasted_end), seg_ed) - 1e-3
         ]
         if steps_in_seg:
           s0, s1 = steps_in_seg[0], steps_in_seg[-1]
@@ -511,16 +511,13 @@ def build_timeline(parsed: event_parser.ParsedLogs) -> list[Segment]:
           prod_start, step_block_end, [(s.start, s.end) for s in run_jit_segs]
       )
 
-      def _productive_step_end(i: int) -> float:
-        if i + 1 < len(productive_pairs):
-          return productive_pairs[i + 1][1]
-        return step_block_end
-
       for seg_st, seg_ed in productive_intervals:
         steps_in_seg = [
             sn
             for idx, (sn, ts) in enumerate(productive_pairs)
-            if max(ts, seg_st) < min(_productive_step_end(idx), seg_ed) - 1e-3
+            if max(ts, seg_st)
+            < min(_step_end(productive_pairs, idx, step_block_end), seg_ed)
+            - 1e-3
         ]
         if steps_in_seg:
           s0, s1 = steps_in_seg[0], steps_in_seg[-1]

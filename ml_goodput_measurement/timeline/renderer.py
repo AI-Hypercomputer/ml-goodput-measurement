@@ -1,19 +1,19 @@
-"""Renderer for pathways interruptions goodput timeline."""
+"""Renderer for the goodput timeline."""
 
 import bisect
 import collections
 import datetime
+import html as html_lib
 from typing import Any, NamedTuple, Optional, Sequence, Union
 
+from cloud_goodput.ml_goodput_measurement.timeline import builder
+from cloud_goodput.ml_goodput_measurement.timeline import event_parser
+from cloud_goodput.ml_goodput_measurement.timeline import events
+from cloud_goodput.ml_goodput_measurement.timeline import metrics
+from cloud_goodput.ml_goodput_measurement.timeline import step_times
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-
-from . import builder
-from . import event_parser
-from . import events
-from . import metrics
-from . import step_times
 
 _FALLBACK_COLOR = '#95a5a6'
 
@@ -1551,12 +1551,15 @@ def _build_summary_html(
 ) -> str:
   """Builds a 5-KPI banner and breakdown table with inline bars."""
   try:
-    (
-        goodput_val,
-        _,
-        last_step,
-        total_job_time,
-    ) = metrics.calculate_goodput_metrics(entries, workload_id)
+    goodput_error = ''
+    try:
+      goodput_val, _, last_step, total_job_time = (
+          metrics.calculate_goodput_metrics(entries, workload_id)
+      )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      # Keep the other metrics; the Goodput card shows the error, not 0%.
+      goodput_error = f'{type(e).__name__}: {e}'
+      goodput_val, last_step, total_job_time = 0.0, 0, 0.0
     timeline_metrics = metrics.calculate_timeline_metrics(segments)
     mtbi = timeline_metrics['mtbi']
     if rec_stats is None:
@@ -1654,6 +1657,17 @@ def _build_summary_html(
         ' font-variant-numeric:tabular-nums;">100.0%</td></tr>'
     )
 
+    if goodput_error:
+      goodput_text = 'n/a'
+      goodput_detail = f'Goodput unavailable: {html_lib.escape(goodput_error)}'
+    else:
+      goodput_text = f'{goodput_val:.2f}%'
+      goodput_detail = (
+          f'{_fmt_duration(productive_s)} preserved productive /'
+          f' {_fmt_duration(total_job_time)} total job time &bull; Step'
+          f' {last_step}'
+      )
+
     disruptions_label = f'{rec_stats.num_incidents} Disruption' + (
         's' if rec_stats.num_incidents != 1 else ''
     )
@@ -1666,8 +1680,8 @@ def _build_summary_html(
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 1.35rem;">
     <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: #ecfdf5; border: 1px solid #a7f3d0; border-left: 4px solid #10b981;">
       <div style="font-size: 0.72rem; font-weight: 700; color: #047857; text-transform: uppercase; letter-spacing: 0.04em;">Goodput %</div>
-      <div style="font-size: 1.6rem; font-weight: 800; color: #065f46; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{goodput_val:.2f}%</div>
-      <div style="font-size: 0.76rem; color: #065f46;">{_fmt_duration(productive_s)} preserved productive / {_fmt_duration(total_job_time)} total job time &bull; Step {last_step}</div>
+      <div style="font-size: 1.6rem; font-weight: 800; color: #065f46; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{goodput_text}</div>
+      <div style="font-size: 0.76rem; color: #065f46;">{goodput_detail}</div>
     </div>
 
     <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #64748b;">
@@ -1721,7 +1735,7 @@ def _build_summary_html(
   except Exception as e:  # pylint: disable=broad-exception-caught
     return (
         '<div class="error" style="color: red; margin-bottom: 20px;">Error'
-        f' calculating metrics: {e}</div>'
+        f' calculating metrics: {html_lib.escape(str(e))}</div>'
     )
 
 

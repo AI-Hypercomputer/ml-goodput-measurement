@@ -1,3 +1,5 @@
+from unittest import mock
+
 from absl.testing import absltest
 
 from cloud_goodput.ml_goodput_measurement.timeline import builder
@@ -376,6 +378,37 @@ class MetricsTest(absltest.TestCase):
     self.assertEqual(last_step, 2)
     self.assertTrue(badput_breakdown)
     self.assertEqual(total_job_time, 40.0)
+
+  def test_calculate_goodput_metrics_raises_calculator_errors(self):
+    entries = [
+        {'job_start_time': 100.0},
+        {'step_count': 0, 'step_start_time': 110.0},
+        {'job_end_time': 140.0},
+    ]
+    with mock.patch.object(
+        metrics.goodput.GoodputCalculator,
+        'get_job_goodput',
+        side_effect=RuntimeError('no step data'),
+    ):
+      # Not reported as a Goodput of 0.
+      with self.assertRaisesRegex(RuntimeError, 'no step data'):
+        metrics.calculate_goodput_metrics(entries, 'test_job')
+
+  def test_summary_shows_goodput_error_and_keeps_other_metrics(self):
+    entries = [
+        {'job_start_time': 100.0},
+        {'step_count': 0, 'step_start_time': 110.0},
+        {'step_count': 1, 'step_start_time': 120.0},
+        {'job_end_time': 140.0},
+    ]
+    segments = builder.build_timeline(event_parser.parse_entries(entries))
+    with mock.patch.object(
+        metrics, 'calculate_goodput_metrics', side_effect=KeyError('directory')
+    ):
+      html_div = renderer.to_html_div(segments, 'test-wl', entries=entries)
+    self.assertIn('Goodput unavailable: KeyError', html_div)
+    self.assertIn('Disruptions &amp; MTBI', html_div)
+    self.assertNotIn('Error calculating metrics', html_div)
 
   def test_calculate_goodput_metrics_elastic(self):
     entries = [

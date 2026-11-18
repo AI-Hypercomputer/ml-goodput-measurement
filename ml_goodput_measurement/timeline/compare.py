@@ -32,13 +32,12 @@ import threading
 import time
 from typing import Any, Callable, Optional, Sequence, TypeVar, Union
 
+from cloud_goodput.ml_goodput_measurement.timeline import builder
+from cloud_goodput.ml_goodput_measurement.timeline import event_parser
+from cloud_goodput.ml_goodput_measurement.timeline import events
+from cloud_goodput.ml_goodput_measurement.timeline import log_fetcher
+from cloud_goodput.ml_goodput_measurement.timeline import metrics
 import plotly.graph_objects as go
-
-from . import builder
-from . import event_parser
-from . import events
-from . import log_fetcher
-from . import metrics
 
 
 @dataclasses.dataclass(frozen=True)
@@ -145,7 +144,7 @@ _DEFAULT_TITLE = 'Goodput Cross-Run Comparison'
 _DEFAULT_SUBTITLE = (
     'Cross-run comparison table and recovery anatomy, mean per incident.'
 )
-_TOOL_PATH = '//third_party/py/cloud_goodput/ml_goodput_measurement/timeline'
+_TOOL_NAME = 'ml-goodput-measurement timeline'
 # Panel A labels a segment with its time from this fraction of the largest
 # MTTR in the chart on.
 _MIN_VALUE_LABEL_FRACTION = 0.06
@@ -193,7 +192,7 @@ def format_chips(chips: int) -> str:
 class JobSetInfo:
   """Model and scale of a workload, from the request that created its JobSet."""
 
-  name: str = ''  # JobSet name, e.g. 'pw-no-4x1k-0822-2'.
+  name: str = ''  # JobSet name, e.g. 'restart-4x1k-1'.
   model_name: str = ''  # model_name=... in the container args.
   slices: int = 0  # Replicas of the TPU replicated jobs.
   # Pods per replica × TPU chips per pod; 0 if the TPU jobs differ.
@@ -523,7 +522,7 @@ def _parse_time(value: Any) -> datetime.datetime:
   """Parses an ISO 8601 time; a time without a UTC offset is in UTC.
 
   Args:
-    value: The time, e.g. '2026-08-21T18:00:00-07:00'.
+    value: The time, e.g. '2026-01-21T18:00:00-08:00'.
 
   Returns:
     The time with its time zone.
@@ -1955,7 +1954,7 @@ def _summary_row_html(
   if base is s and len(group.summaries) > 1:
     mode += sub('baseline')
   # The cell does not wrap (td.wl) except at the <wbr> after each '_', so long
-  # ids such as logger_pr18_mode2_pnr_ckpt wrap but pw-no-4x1k-0822-2 does not.
+  # ids such as long_snake_case_run_id wrap but restart-4x1k-1 does not.
   workload = _esc(s.workload_id).replace('_', '_<wbr>')
   if s.timeline_url:
     workload = (
@@ -2568,7 +2567,7 @@ def to_comparison_html(
       title=_esc(title),
       subtitle=_esc(subtitle),
       css=_CSS,
-      tool=_TOOL_PATH,
+      tool=_TOOL_NAME,
       badge=f'{n} workloads \u00b7 generated {generated}',
       body=body,
   )

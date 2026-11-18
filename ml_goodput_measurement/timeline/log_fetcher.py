@@ -67,9 +67,9 @@ def fetch_log_entries(
   are kept. Entries without a JSON payload are skipped.
 
   Args:
-    project_id: GCP project.
+    project_id: GCP project ID.
     workload_id: Workload ID.
-    start_time: Optional start time, e.g. '2026-08-21T18:00:00-07:00'.
+    start_time: Optional start time, e.g. '2026-01-21T18:00:00-08:00'.
     end_time: Optional end time.
     credentials: Optional credentials.
 

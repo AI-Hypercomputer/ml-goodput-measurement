@@ -8,11 +8,11 @@ from typing import Any, Optional, Union
 from cloud_goodput.ml_goodput_measurement.src import goodput
 from cloud_goodput.ml_goodput_measurement.src import goodput_elastic
 from cloud_goodput.ml_goodput_measurement.src import goodput_utils
+from cloud_goodput.ml_goodput_measurement.timeline import event_parser
+from cloud_goodput.ml_goodput_measurement.timeline import step_times
+from cloud_goodput.ml_goodput_measurement.timeline.builder import Segment
+from cloud_goodput.ml_goodput_measurement.timeline.events import EventType
 import pandas as pd
-from . import event_parser
-from . import step_times
-from .builder import Segment
-from .events import EventType
 
 # Alias for convenience
 UnproductiveTimeDict = goodput.UnproductiveTimeDict
@@ -312,17 +312,15 @@ def calculate_goodput_metrics(
           cache_dir=temp_dir,
       )
 
-    try:
-      goodput_val, badput_breakdown, last_step = calculator.get_job_goodput(
-          include_badput_breakdown=True
-      )
-      with calculator._goodput_cache_lock:  # pylint: disable=protected-access
-        info = calculator._goodput_cache.get_goodput_info()  # pylint: disable=protected-access
-        total_job_time = info.total_elapsed_time if info else 0.0
-      return goodput_val, badput_breakdown, last_step, total_job_time
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      print(f'Error calculating goodput: {e}')
-      return 0.0, {}, 0, 0.0
+    # Errors propagate: compare shows Goodput as unavailable and the timeline
+    # page shows the error, rather than a misleading Goodput of 0.
+    goodput_val, badput_breakdown, last_step = calculator.get_job_goodput(
+        include_badput_breakdown=True
+    )
+    with calculator._goodput_cache_lock:  # pylint: disable=protected-access
+      info = calculator._goodput_cache.get_goodput_info()  # pylint: disable=protected-access
+      total_job_time = info.total_elapsed_time if info else 0.0
+    return goodput_val, badput_breakdown, last_step, total_job_time
 
 
 def stepping_windows(

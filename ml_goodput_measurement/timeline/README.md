@@ -1,4 +1,4 @@
-# Instructions for building timeline view compatible with vbarr-view
+# Goodput timeline and run comparison
 
 ## Create a virtual env and install some deps
 ```
@@ -8,16 +8,15 @@ pip install -r requirements.txt
 ```
 
 The commands below run blaze from this directory. `blaze run` does not run the
-tool in the current directory, so pass absolute paths (`$(pwd)/...`). Without
-blaze, the same flags work with `python -m timeline.main`, run from the
-parent directory. The tool creates `outputs/compare` and `outputs/timeline` in
-the current directory when they are missing, and caches the logs that it reads
-from Cloud Logging in `outputs/cache` (see "Log cache" at the end).
+tool in the current directory, so pass absolute paths (`$(pwd)/...`). The tool
+creates `outputs/compare` and `outputs/timeline` in the current directory when
+they are missing, and caches the logs that it reads from Cloud Logging in
+`outputs/cache` (see "Log cache" at the end).
 
 ## Confirm Goodput logs exist for the workload and project of interest.
 
 ```
-export PROJECT=cloud-tpu-multipod-dev
+export PROJECT=my-gcp-project
 blaze run :main -- --command=list --project_id=$PROJECT
 ```
 
@@ -29,10 +28,10 @@ it again, e.g. for a narrower time range, does not read Cloud Logging again;
 `--refresh_cache` reads them again, e.g. for a job that is still running.
 
 ```
-export PROJECT=cloud-tpu-multipod-dev
-export WORKLOAD=pw-rr-4x1k-0825-1
-export START=2026-08-23T15:45:06-07:00
-export END=2026-08-26T06:25:46-07:00
+export PROJECT=my-gcp-project
+export WORKLOAD=resize-4x1k-2
+export START=2026-01-23T15:45:06-08:00
+export END=2026-01-26T06:25:46-08:00
 
 blaze run :main -- --command=export \
 --project_id=$PROJECT \
@@ -154,16 +153,16 @@ workload with recovery incidents:
 ```
 {
   "title": "Recovery modes: Llama-3.1-405B on 4x1k TPU7x",
-  "project_id": "cloud-tpu-multipod-dev",
+  "project_id": "my-gcp-project",
   "workloads": [
-    {"workload_id": "pw-no-4x1k-0822-2", "label": "Full JobSet restart",
+    {"workload_id": "restart-4x1k-1", "label": "Full JobSet restart",
      "model": "Llama-3.1-405B", "shape": "4x1k",
-     "start_time": "2026-08-21T18:00:00-07:00",
-     "end_time": "2026-08-22T19:00:00-07:00"},
-    {"workload_id": "pw-rr-4x1k-0823-01", "label": "Elastic Replica Resize",
+     "start_time": "2026-01-21T18:00:00-08:00",
+     "end_time": "2026-01-22T19:00:00-08:00"},
+    {"workload_id": "resize-4x1k-1", "label": "Elastic Replica Resize",
      "model": "Llama-3.1-405B", "shape": "4x1k",
-     "start_time": "2026-08-22T18:00:00-07:00",
-     "end_time": "2026-08-23T19:00:00-07:00",
+     "start_time": "2026-01-22T18:00:00-08:00",
+     "end_time": "2026-01-23T19:00:00-08:00",
      "note": "Goodput and MTBI cover a shorter run."}
   ]
 }
@@ -176,28 +175,28 @@ the scale joined by " · ":
 ```
 {
   "title": "Pathways elasticity vs. McJAX baselines on TPU7x",
-  "project_id": "cloud-tpu-multipod-dev",
+  "project_id": "my-gcp-project",
   "groups": [
     {"name": "Llama-3.1-405B · 2x1k", "description": "TPU7x, 2,048 chips"},
     {"name": "Llama-3.1-8B · 2x64", "description": "TPU7x, 128 chips"}
   ],
   "workloads": [
-    {"workload_id": "pw-snp-2x1k-0818-2", "label": "Elastic Snapshotting",
+    {"workload_id": "snapshot-2x1k-1", "label": "Elastic Snapshotting",
      "model": "Llama-3.1-405B", "shape": "2x1k",
-     "start_time": "2026-08-17T19:00:00-07:00",
-     "end_time": "2026-08-18T20:00:00-07:00"},
-    {"workload_id": "yusharon-ubench-hnspbh85", "label": "McJAX",
+     "start_time": "2026-01-17T19:00:00-08:00",
+     "end_time": "2026-01-18T20:00:00-08:00"},
+    {"workload_id": "mcjax-2x1k-1", "label": "McJAX",
      "model": "Llama-3.1-405B", "shape": "2x1k", "baseline": true,
-     "start_time": "2026-08-20T12:00:00-07:00",
-     "end_time": "2026-08-20T20:30:00-07:00"},
-    {"workload_id": "pw-rr-0819-s2", "label": "Elastic Replica Resize",
+     "start_time": "2026-01-20T12:00:00-08:00",
+     "end_time": "2026-01-20T20:30:00-08:00"},
+    {"workload_id": "resize-2x64-1", "label": "Elastic Replica Resize",
      "model": "Llama-3.1-8B", "shape": "2x64",
-     "start_time": "2026-08-19T08:00:00-07:00",
-     "end_time": "2026-08-19T20:00:00-07:00"},
-    {"workload_id": "yusharon-ubench-rx33blrz", "label": "McJAX",
+     "start_time": "2026-01-19T08:00:00-08:00",
+     "end_time": "2026-01-19T20:00:00-08:00"},
+    {"workload_id": "mcjax-2x64-1", "label": "McJAX",
      "model": "Llama-3.1-8B", "shape": "2x64", "baseline": true,
-     "start_time": "2026-08-19T12:00:00-07:00",
-     "end_time": "2026-08-20T09:00:00-07:00"}
+     "start_time": "2026-01-19T12:00:00-08:00",
+     "end_time": "2026-01-20T09:00:00-08:00"}
   ]
 }
 ```
@@ -214,12 +213,12 @@ keep, e.g. to `saved_logs/`:
 {
   "title": "Recovery modes from saved logs",
   "workloads": [
-    {"workload_id": "pw-snp-2x1k-0818-2", "label": "Elastic Snapshotting",
+    {"workload_id": "snapshot-2x1k-1", "label": "Elastic Snapshotting",
      "model": "Llama-3.1-405B", "shape": "2x1k",
-     "entries_path": "saved_logs/pw-snp-2x1k-0818-2.json"},
-    {"workload_id": "abhi-2x1k-0825-01", "label": "Elastic Snapshotting",
+     "entries_path": "saved_logs/snapshot-2x1k-1.json"},
+    {"workload_id": "snapshot-2x1k-2", "label": "Elastic Snapshotting",
      "model": "Llama-3.1-405B", "shape": "2x1k",
-     "entries_path": "saved_logs/abhi-2x1k-0825-01.json"}
+     "entries_path": "saved_logs/snapshot-2x1k-2.json"}
   ]
 }
 ```
@@ -232,7 +231,7 @@ Workload keys:
 *   `label`: the recovery mode, shown in the table.
 *   `model` and `shape`: the model and scale, e.g. "Llama-3.1-405B" and "2x1k".
     They decide the group of the workload.
-*   `start_time` and `end_time`, e.g. "2026-08-21T18:00:00-07:00". Always set
+*   `start_time` and `end_time`, e.g. "2026-01-21T18:00:00-08:00". Always set
     a start time: without one, Cloud Logging only returns the last 24 hours of
     logs. A narrow time range per workload is also much faster.
 *   `baseline`: true for the baseline of its group (see "Groups and baselines"

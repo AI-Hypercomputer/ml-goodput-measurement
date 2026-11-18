@@ -2,30 +2,15 @@ import argparse
 import datetime
 import os
 import sys
-
-try:
-  from cloud_goodput.ml_goodput_measurement.timeline import builder
-  from cloud_goodput.ml_goodput_measurement.timeline import compare
-  from cloud_goodput.ml_goodput_measurement.timeline import event_parser
-  from cloud_goodput.ml_goodput_measurement.timeline import log_fetcher
-  from cloud_goodput.ml_goodput_measurement.timeline import renderer
-except ImportError:
-  try:
-    from . import builder
-    from . import compare
-    from . import event_parser
-    from . import log_fetcher
-    from . import renderer
-  except ImportError:
-    import builder
-    import compare
-    import event_parser
-    import log_fetcher
-    import renderer
-
+from typing import Optional
 
 from absl import app
 from absl import flags
+from cloud_goodput.ml_goodput_measurement.timeline import builder
+from cloud_goodput.ml_goodput_measurement.timeline import compare
+from cloud_goodput.ml_goodput_measurement.timeline import event_parser
+from cloud_goodput.ml_goodput_measurement.timeline import log_fetcher
+from cloud_goodput.ml_goodput_measurement.timeline import renderer
 
 FLAGS = flags.FLAGS
 flags.DEFINE_enum(
@@ -34,7 +19,12 @@ flags.DEFINE_enum(
     ['export', 'list', 'compare'],
     'Command to run: export, list or compare.',
 )
-flags.DEFINE_string('project_id', 'cloud-tpu-multipod-dev', 'GCP project ID.')
+flags.DEFINE_string(
+    'project_id',
+    None,
+    'GCP project ID. Defaults to the GOOGLE_CLOUD_PROJECT environment'
+    ' variable.',
+)
 flags.DEFINE_string('workload_id', None, 'Workload ID or run name.')
 flags.DEFINE_string('start_time', None, 'ISO 8601 UTC start time.')
 flags.DEFINE_string('end_time', None, 'ISO 8601 UTC end time.')
@@ -110,13 +100,24 @@ def _compare() -> None:
   config = compare.load_config(FLAGS.compare_config)
 
   specs = config.workloads
+  project_id = _project_id(required=False)
+  no_project = [
+      s.workload_id
+      for s in specs
+      if not s.entries_path and not (s.project_id or project_id)
+  ]
+  if no_project:
+    raise app.UsageError(
+        f'No GCP project for {", ".join(no_project)}: set project_id in the'
+        ' --compare_config file, --project_id or GOOGLE_CLOUD_PROJECT.'
+    )
   print(
       f'Loading the logs of {len(specs)} workloads, up to'
       f' {FLAGS.compare_parallel_fetches} at a time...'
   )
   loaded = compare.load_workloads(
       specs,
-      FLAGS.project_id,
+      project_id or '',
       cache_dir=_cache_dir(),
       max_parallel=FLAGS.compare_parallel_fetches,
       jobset_lookup=FLAGS.compare_jobset_lookup,
@@ -170,12 +171,23 @@ def _compare() -> None:
     print(f'CSV written to {csv_path}')
 
 
+def _project_id(required: bool) -> Optional[str]:
+  """--project_id, else the GOOGLE_CLOUD_PROJECT environment variable."""
+  project_id = FLAGS.project_id or os.environ.get('GOOGLE_CLOUD_PROJECT')
+  if required and not project_id:
+    raise app.UsageError(
+        '--project_id or the GOOGLE_CLOUD_PROJECT environment variable must be'
+        ' set to read logs from Cloud Logging.'
+    )
+  return project_id
+
+
 def _working_dir() -> str:
-  """The directory the command was run from, also under `blaze run`."""
+  """The directory the command was run from, also under `bazel run`."""
   return os.environ.get('BUILD_WORKING_DIRECTORY') or os.getcwd()
 
 
-def _cache_dir() -> str | None:
+def _cache_dir() -> Optional[str]:
   """--entries_cache_dir relative to the working directory; None if empty."""
   if not FLAGS.entries_cache_dir:
     return None
@@ -185,9 +197,9 @@ def _cache_dir() -> str | None:
 def _ensure_output_dirs() -> None:
   """Creates outputs/compare and outputs/timeline in the working directory.
 
-  Piper keeps no empty directories, so the directories used by the README
-  commands are created here. Under `blaze run`, the working directory is the
-  one the command was run from.
+  Version control keeps no empty directories, so the directories used by the
+  README commands are created here. Under `bazel run`, the working directory is
+  the one the command was run from.
   """
   cwd = _working_dir()
   for name in ('compare', 'timeline'):
@@ -197,13 +209,14 @@ def _ensure_output_dirs() -> None:
 def main(argv: list[str]) -> None:
   _ensure_output_dirs()
   if FLAGS.command == 'list':
-    workloads = log_fetcher.list_workloads(FLAGS.project_id)
+    project_id = _project_id(required=True)
+    workloads = log_fetcher.list_workloads(project_id)
     if not workloads:
       print('No workloads with goodput logs found.')
       return
     print(
         f'Found {len(workloads)} workload(s) with goodput logs in'
-        f' {FLAGS.project_id}:'
+        f' {project_id}:'
     )
     for w in workloads:
       print(f' {w}')
@@ -229,7 +242,7 @@ def main(argv: list[str]) -> None:
               start_time=FLAGS.start_time,
               end_time=FLAGS.end_time,
           ),
-          FLAGS.project_id,
+          _project_id(required=True),
           cache_dir=_cache_dir(),
           refresh=FLAGS.refresh_cache,
       )

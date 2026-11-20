@@ -393,6 +393,7 @@ class _CloudLogger:
       end_time: Optional[datetime.datetime],
       overlap_seconds: float,
       known_entry_ids: Collection[str],
+      start_time: Optional[datetime.datetime] = None,
   ) -> tuple[
       list[Any],
       tuple[Optional[datetime.datetime], Optional[str]],
@@ -409,13 +410,15 @@ class _CloudLogger:
 
     Args:
       last_entry_info: `(timestamp, insert_id)` of the newest entry read so
-        far, or None to read everything within the retention period.
+        far, or None to read everything after `start_time`.
       end_time: Inclusive upper bound of the query window, or None for the
         current time.
       overlap_seconds: How far before the cursor to re-check for late entries.
         With 0 the read starts right after the cursor, as before.
       known_entry_ids: insertIds already in the cache; such entries are
         dropped.
+      start_time: Exclusive lower bound of the query window when there is no
+        cursor, or None to read everything within the retention period.
 
     Returns:
       A tuple of the new entry payloads in ascending timestamp order, the
@@ -431,7 +434,7 @@ class _CloudLogger:
       )
       filter_msg = self._get_filter_msg(window_start, end_time)
     else:
-      filter_msg = self._get_filter_msg(None, end_time, last_entry_info)
+      filter_msg = self._get_filter_msg(start_time, end_time, last_entry_info)
     entries = self.logger.list_entries(
         filter_=filter_msg,
         order_by=google.cloud.logging.ASCENDING,
@@ -939,6 +942,10 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
     self._last_interval_entry_info: Optional[
         tuple[datetime.datetime, str]
     ] = None
+    # insertId -> log timestamp of the window's entries, and the timestamp from
+    # which on every entry's id is known; see `_get_interval_log_entries`.
+    self._interval_recent_entry_ids: dict[str, datetime.datetime] = {}
+    self._interval_ids_since: Optional[datetime.datetime] = None
     self._last_interval_start_time: Optional[datetime.datetime] = None
     self._last_interval_end_time: Optional[datetime.datetime] = None
     if cloud_logger is not None:
@@ -2235,7 +2242,22 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
   def _get_interval_log_entries(
       self, start_time: datetime.datetime, end_time: datetime.datetime
   ):
-    """Helper function to get log entries from an interval window incrementally."""
+    """Helper function to get log entries from an interval window incrementally.
+
+    A window that slides forward is read incrementally like the cumulative
+    timeline: the read starts `read_overlap_seconds` before the cursor (capped
+    to the window whose insertIds are known), drops the insertIds already read
+    and stops `read_lag_seconds` before `end_time`, so entries that became
+    queryable late are picked up exactly once and inserted in chronological
+    order; see `_CloudLogger.read_new_entries`.
+
+    Args:
+      start_time: Exclusive start of the window.
+      end_time: Inclusive end of the window.
+
+    Raises:
+      ValueError: If a bound is missing or the window holds no entries.
+    """
     if start_time is None or end_time is None:
       raise ValueError(
           'Start and end times are required to get log entries from an interval'
@@ -2250,31 +2272,38 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
         and start_time >= self._last_interval_start_time
     )
 
-    if not is_sequential:
-      # Reset cache for non-sequential (arbitrary/jump) queries
-      self._interval_cache = []
-      self._last_interval_entry_info = None
-
-    if not self._interval_cache or self._last_interval_entry_info is None:
+    if (
+        not is_sequential
+        or not self._interval_cache
+        or self._last_interval_entry_info is None
+    ):
       # Full query for cold start or non-sequential query
-      entries, last_info = self._cloud_logger.read_cloud_logging_entries(
-          start_time=start_time,
-          end_time=end_time,
+      self._reset_interval_cache()
+      entries, cursor, entry_ids = self._cloud_logger.read_new_entries(
+          None, end_time, 0.0, (), start_time=start_time
       )
       self._interval_cache = entries
-      self._last_interval_entry_info = last_info
+      self._interval_ids_since = start_time
+      self._advance_interval_cursor(cursor, entry_ids)
     else:
-      # Incremental query: fetch only delta since last timestamp
-      last_ts, _ = self._last_interval_entry_info
-      if last_ts and end_time > last_ts:
-        new_entries, last_info = self._cloud_logger.read_cloud_logging_entries(
-            start_time=last_ts,
-            end_time=end_time,
-            last_entry_info=self._last_interval_entry_info,
+      # Incremental query: fetch the delta since the cursor, re-checking the
+      # overlap window before it for entries that became queryable late.
+      read_end_time = max(
+          start_time,
+          end_time - datetime.timedelta(seconds=self._read_lag_seconds),
+      )
+      if read_end_time > self._last_interval_entry_info[0]:
+        new_entries, cursor, entry_ids = self._cloud_logger.read_new_entries(
+            self._last_interval_entry_info,
+            read_end_time,
+            self._interval_read_overlap_seconds(),
+            self._interval_recent_entry_ids,
         )
-        self._interval_cache.extend(new_entries)
-        if last_info and last_info[0] is not None:
-          self._last_interval_entry_info = last_info
+        if new_entries:
+          self._interval_cache = goodput_utils.sort_chronologically(
+              self._interval_cache + new_entries
+          )
+        self._advance_interval_cursor(cursor, entry_ids)
 
     # Slide the window in-memory: discard older entries
     self._interval_cache = [
@@ -2293,6 +2322,63 @@ class GoodputCalculator(goodput_exclusion.GoodputExclusion):
           'No log entries found within the interval window between %s and %s.'
           % (start_time, end_time)
       )
+
+  def _reset_interval_cache(self):
+    """Forgets the interval window's entries, cursor and known insertIds."""
+    self._interval_cache = []
+    self._last_interval_entry_info = None
+    self._interval_recent_entry_ids = {}
+    self._interval_ids_since = None
+
+  def _interval_read_overlap_seconds(self) -> float:
+    """Returns how far before the cursor the next interval read may start.
+
+    Capped at the window whose insertIds are known, like
+    `GoodputCache.get_read_overlap_seconds`, so entries read before ids were
+    tracked are not added a second time. Zero when there is no cursor.
+    """
+    if (
+        self._last_interval_entry_info is None
+        or self._interval_ids_since is None
+    ):
+      return 0.0
+    known_window = (
+        self._last_interval_entry_info[0] - self._interval_ids_since
+    ).total_seconds()
+    return max(0.0, min(self._read_overlap_seconds, known_window))
+
+  def _advance_interval_cursor(
+      self,
+      cursor: tuple[Optional[datetime.datetime], Optional[str]],
+      entry_ids: list[tuple[str, datetime.datetime]],
+  ):
+    """Remembers the insertIds just read and advances the interval cursor.
+
+    Ids older than `read_overlap_seconds` before the cursor are forgotten, as
+    no later overlapping read returns their entries.
+
+    Args:
+      cursor: `(timestamp, insert_id)` of the newest entry read so far, as
+        returned by `_CloudLogger.read_new_entries`; ignored when None.
+      entry_ids: `(insert_id, timestamp)` of every entry the read returned.
+    """
+    for insert_id, timestamp in entry_ids:
+      self._interval_recent_entry_ids[insert_id] = timestamp
+    cursor_ts, cursor_id = cursor
+    if cursor_ts is None or cursor_id is None:
+      return
+    self._last_interval_entry_info = (cursor_ts, cursor_id)
+    ids_since = cursor_ts - datetime.timedelta(
+        seconds=self._read_overlap_seconds
+    )
+    if self._interval_ids_since is not None:
+      ids_since = max(ids_since, self._interval_ids_since)
+    self._interval_ids_since = ids_since
+    self._interval_recent_entry_ids = {
+        insert_id: timestamp
+        for insert_id, timestamp in self._interval_recent_entry_ids.items()
+        if timestamp >= ids_since
+    }
 
   def _sanitize_unproductive_times(
       self,

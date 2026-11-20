@@ -86,11 +86,16 @@ class MockCloudLogger:
     ], self.last_entry_info
 
   def read_new_entries(
-      self, last_entry_info, end_time, overlap_seconds, known_entry_ids
+      self,
+      last_entry_info,
+      end_time,
+      overlap_seconds,
+      known_entry_ids,
+      start_time=None,
   ):
     """Mirrors `_CloudLogger.read_new_entries` over the in-memory entries."""
     cursor_ts, cursor_id = last_entry_info or (None, None)
-    window_start = None
+    window_start = _to_aware(start_time)
     if cursor_ts is not None:
       window_start = _to_aware(cursor_ts) - datetime.timedelta(
           seconds=overlap_seconds
@@ -3776,6 +3781,210 @@ class LateEntriesTest(googletest.TestCase):
     self.assertEqual(calculator._read_overlap_seconds, 1.0)
     self.assertEqual(calculator._read_lag_seconds, 2.0)
     self.assertLen(logs.output, 2)
+
+
+class IntervalLateEntriesTest(googletest.TestCase):
+  """Sliding interval queries pick up entries that became visible late."""
+
+  def setUp(self):
+    super().setUp()
+    self.job_name = f'test-run-{self.id().split(".")[-1]}'
+    self.logger_name = 'test-log'
+    self.mock_cloud_logger = MockCloudLogger(self.job_name, self.logger_name)
+    self.goodput_recorder = goodput.GoodputRecorder(
+        self.job_name,
+        self.logger_name,
+        True,
+        self.mock_cloud_logger,
+    )
+    self.goodput_calculator = self._make_calculator()
+    self.goodput_recorder.record_job_start_time(_TEST_JOB_START_TIME)
+    self._record_steps([(0, 0), (1, 3), (2, 6), (3, 9)])
+
+  def _make_calculator(self, **kwargs):
+    return goodput.GoodputCalculator(
+        self.job_name,
+        self.logger_name,
+        self.mock_cloud_logger,
+        cache_dir=self.create_tempdir().full_path,
+        **kwargs,
+    )
+
+  def _step_time(self, offset_seconds):
+    return _TEST_STEP_START_TIME + datetime.timedelta(seconds=offset_seconds)
+
+  def _record_steps(self, steps_and_offsets):
+    for step, offset_seconds in steps_and_offsets:
+      self.goodput_recorder.record_step_start_time(
+          step, self._step_time(offset_seconds)
+      )
+
+  def _record_synchronous_save(self, step, offset_seconds, duration):
+    self.mock_cloud_logger.write_cloud_logging_entry(
+        asdict(
+            MockSaveStepStatistics(
+                step=step,
+                directory='gs://bucket/path',
+                checkpoint_manager_blocking_start_time=self._step_time(
+                    offset_seconds
+                ).timestamp(),
+                checkpoint_manager_blocking_duration_secs=duration,
+                synchronous=True,
+            )
+        )
+    )
+
+  def _query(self, start_offset, end_offset, calculator=None):
+    calculator = calculator or self.goodput_calculator
+    return calculator.get_job_goodput_interval(
+        self._step_time(start_offset), self._step_time(end_offset)
+    )
+
+  def _window_step_counts(self, calculator=None):
+    calculator = calculator or self.goodput_calculator
+    return [
+        entry.get(goodput._STEP_COUNT) for entry in calculator._interval_entries
+    ]
+
+  def test_slide_reads_late_entry_once(self):
+    # Steps 0-3 in the window: 9 s of training, all productive.
+    computed_goodput, _, last_step, total_job_time, _ = self._query(-1, 10)
+    self.assertAlmostEqual(computed_goodput, 100.0, delta=0.01)
+    self.assertEqual((last_step, total_job_time), (2, 9.0))
+    self.assertEqual(
+        self.goodput_calculator._last_interval_entry_info[0],
+        self._step_time(9),
+    )
+
+    # A 1 s synchronous save during step 1 becomes visible after the cursor
+    # passed its timestamp, together with a new step 4.
+    self._record_synchronous_save(step=1, offset_seconds=4, duration=1.0)
+    self._record_steps([(4, 12)])
+
+    with mock.patch.object(
+        self.mock_cloud_logger,
+        'read_new_entries',
+        wraps=self.mock_cloud_logger.read_new_entries,
+    ) as read_new_entries:
+      computed_goodput, badput_breakdown, last_step, total_job_time, _ = (
+          self._query(1, 13)
+      )
+    # The overlap reaches back to the first window's start, where ids are
+    # known from.
+    read_new_entries.assert_called_once_with(
+        (self._step_time(9), 'insert-id-5'),
+        self._step_time(13),
+        10.0,
+        mock.ANY,
+    )
+    self.assertEqual(self._window_step_counts(), [1, None, 2, 3, 4])
+    self.assertEqual((last_step, total_job_time), (3, 9.0))
+    self.assertAlmostEqual(computed_goodput, 8.0 / 9.0 * 100, delta=0.01)
+    self.assertAlmostEqual(
+        badput_breakdown[BadputType.UNPRODUCTIVE_CHECKPOINT_SAVE_TIME],
+        1.0 / 9.0 * 100,
+        delta=0.01,
+    )
+    self.assertEqual(
+        self.goodput_calculator._last_interval_entry_info[0],
+        self._step_time(12),
+    )
+
+    # The next slide re-checks the overlap with the ids already known and
+    # does not add the late entry again.
+    with mock.patch.object(
+        self.mock_cloud_logger,
+        'read_new_entries',
+        wraps=self.mock_cloud_logger.read_new_entries,
+    ) as read_new_entries:
+      computed_goodput, _, last_step, total_job_time, _ = self._query(2, 14)
+    _, _, overlap_seconds, known_entry_ids = read_new_entries.call_args.args
+    self.assertEqual(overlap_seconds, 13.0)
+    self.assertLen(known_entry_ids, 6)
+    self.assertEqual(self._window_step_counts(), [1, None, 2, 3, 4])
+    self.assertEqual((last_step, total_job_time), (3, 9.0))
+    self.assertAlmostEqual(computed_goodput, 8.0 / 9.0 * 100, delta=0.01)
+
+  def test_jump_resets_known_ids_and_reads_window_again(self):
+    self._query(-1, 10)
+    self.assertLen(self.goodput_calculator._interval_recent_entry_ids, 4)
+
+    # A window that does not slide forward is read in full again.
+    with mock.patch.object(
+        self.mock_cloud_logger,
+        'read_new_entries',
+        wraps=self.mock_cloud_logger.read_new_entries,
+    ) as read_new_entries:
+      _, _, last_step, total_job_time, _ = self._query(-3, 4)
+    read_new_entries.assert_called_once_with(
+        None, self._step_time(4), 0.0, (), start_time=self._step_time(-3)
+    )
+    self.assertEqual(self._window_step_counts(), [0, 1])
+    self.assertEqual((last_step, total_job_time), (0, 3.0))
+    self.assertEqual(
+        self.goodput_calculator._interval_recent_entry_ids,
+        {'insert-id-2': self._step_time(0), 'insert-id-3': self._step_time(3)},
+    )
+    self.assertEqual(
+        self.goodput_calculator._interval_ids_since, self._step_time(-3)
+    )
+
+    # Step 2 was read by the first window; had its id survived the jump, the
+    # slide would drop it as already known.
+    _, _, last_step, total_job_time, _ = self._query(-2, 8)
+    self.assertEqual(self._window_step_counts(), [0, 1, 2])
+    self.assertEqual((last_step, total_job_time), (1, 6.0))
+
+  def test_read_lag_shifts_slide_upper_bound(self):
+    calculator = self._make_calculator(read_lag_seconds=5.0)
+    self._query(-1, 10, calculator)
+    self._record_steps([(4, 12), (5, 15)])
+
+    with mock.patch.object(
+        self.mock_cloud_logger,
+        'read_new_entries',
+        wraps=self.mock_cloud_logger.read_new_entries,
+    ) as read_new_entries:
+      # Reads stop 5 s before the window's end, so step 4 is left for later.
+      _, _, last_step, total_job_time, _ = self._query(1, 16, calculator)
+      self.assertEqual(read_new_entries.call_args.args[1], self._step_time(11))
+      self.assertEqual(self._window_step_counts(calculator), [1, 2, 3])
+      self.assertEqual((last_step, total_job_time), (2, 6.0))
+
+      _, _, last_step, total_job_time, _ = self._query(2, 18, calculator)
+      self.assertEqual(read_new_entries.call_args.args[1], self._step_time(13))
+      self.assertEqual(self._window_step_counts(calculator), [1, 2, 3, 4])
+      self.assertEqual((last_step, total_job_time), (3, 9.0))
+
+      # The upper bound never moves before the window's start.
+      with self.assertRaisesRegex(ValueError, 'No log entries found'):
+        self._query(15, 19, calculator)
+      self.assertEqual(read_new_entries.call_args.args[1], self._step_time(15))
+
+  def test_window_entries_are_chronological_after_late_entries(self):
+    self.goodput_calculator._get_interval_log_entries(
+        self._step_time(-1), self._step_time(10)
+    )
+    self.assertEqual(self._window_step_counts(), [0, 1, 2, 3])
+
+    # A synchronous save during step 1 and step 4 arrive after step 5.
+    self._record_steps([(5, 15)])
+    self.goodput_calculator._get_interval_log_entries(
+        self._step_time(-1), self._step_time(16)
+    )
+    self._record_synchronous_save(step=1, offset_seconds=4, duration=1.0)
+    self._record_steps([(4, 12)])
+    self.goodput_calculator._get_interval_log_entries(
+        self._step_time(-1), self._step_time(17)
+    )
+
+    entries = self.goodput_calculator._interval_entries
+    self.assertEqual(self._window_step_counts(), [0, 1, None, 2, 3, 4, 5])
+    self.assertEqual(entries[2]['event_type'], 'save')
+    self.assertEqual(
+        self.goodput_calculator._get_step_times(entries),
+        {0: 3.0, 1: 2.0, 2: 3.0, 3: 3.0, 4: 3.0},
+    )
 
 
 class CustomSyncLookupTest(googletest.TestCase):

@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Cross-run comparison of goodput and recovery metrics across workloads.
 
 Compares several workloads side by side, for example the same model trained
@@ -31,6 +45,7 @@ import re
 import threading
 import time
 from typing import Any, Callable, Optional, Sequence, TypeVar, Union
+import urllib.parse
 
 from cloud_goodput.ml_goodput_measurement.timeline import builder
 from cloud_goodput.ml_goodput_measurement.timeline import event_parser
@@ -257,6 +272,20 @@ class WorkloadSpec:
           f'"baseline" must be true or false: {d["workload_id"]} has'
           f' {d["baseline"]!r}.'
       )
+    timeline_url = d.get('timeline_url') or ''
+    # The link is opened from the comparison page, so no javascript: URLs.
+    # Browsers drop leading control characters, which urlsplit only strips
+    # since Python 3.10.12 and 3.11.4, so control characters are rejected.
+    if (
+        not isinstance(timeline_url, str)
+        or any(ord(c) < 0x20 or ord(c) == 0x7F for c in timeline_url)
+        or urllib.parse.urlsplit(timeline_url.strip()).scheme
+        not in ('', 'http', 'https')
+    ):
+      raise ValueError(
+          '"timeline_url" must be a relative path or an http(s) URL:'
+          f' {d["workload_id"]} has {timeline_url!r}.'
+      )
     return cls(**d)
 
 
@@ -469,6 +498,8 @@ def load_entries(
   if spec.entries_path:
     return read_entries_file(spec.entries_path)
 
+  # The workload id names the cache file, so check it before reading the file.
+  log_fetcher.check_workload_id(spec.workload_id)
   project = spec.project_id or project_id
   query = {
       'project_id': project,
@@ -795,6 +826,7 @@ def load_jobset(
   Returns:
     The JobSet info, or None if no create entry is found.
   """
+  log_fetcher.check_workload_id(spec.workload_id)
   project = spec.project_id or project_id
   query = {
       'project_id': project,
@@ -2217,7 +2249,7 @@ def _notes_html(
       ' is Lost Progress plus the JIT compile overhead of the re-run.</li>'
       '<li><b>MTBI</b> = mean length of a run\u2019s stepping window.</li>'
       '<li><b>Goodput</b> = preserved productive time / total job time,'
-      ' from the cloud_goodput library. Cells are green from'
+      ' from the ml-goodput-measurement library. Cells are green from'
       f' {_GOODPUT_GREEN:.0f}%, yellow from {_GOODPUT_YELLOW:.0f}% and red'
       ' below. Goodput is n/a when the goodput log has no training step'
       ' events.</li>'

@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import contextlib
 import copy
 import csv
@@ -253,6 +267,25 @@ class SpecTest(absltest.TestCase):
     with self.assertRaisesRegex(ValueError, 'groups'):
       compare.config_from_dict({'workloads': ['a'], 'groups': 'g'})
 
+  def test_timeline_url_is_relative_or_http(self):
+    for url in ('runs/a.html', 'https://example.com/a.html', ''):
+      spec = compare.WorkloadSpec.from_dict(
+          {'workload_id': 'a', 'timeline_url': url}
+      )
+      self.assertEqual(spec.timeline_url, url)
+    for url in (
+        'javascript:alert(1)',
+        ' JavaScript:alert(1)',
+        'data:,x',
+        # Older Python versions do not strip these before parsing the scheme.
+        '\x01javascript:alert(1)',
+        'java\tscript:alert(1)',
+    ):
+      with self.assertRaisesRegex(ValueError, 'timeline_url'):
+        compare.WorkloadSpec.from_dict(
+            {'workload_id': 'a', 'timeline_url': url}
+        )
+
   def test_format_scale_chips(self):
     self.assertEqual(compare.format_scale_chips('4×1k'), '4×1k (4,096)')
     self.assertEqual(compare.format_scale_chips('2x128'), '2x128 (256)')
@@ -375,6 +408,19 @@ class LoadEntriesTest(absltest.TestCase):
         workload_id='wl', entries_path=os.path.join(cache_dir, 'wl.json')
     )
     self.assertEqual(compare.load_entries(cached, 'proj'), _SINGLE_RUN)
+
+  def test_workload_id_is_checked_before_the_cache_is_read(self):
+    cache_dir = self.create_tempdir().full_path
+    spec = compare.WorkloadSpec(workload_id='../x')
+    with self.assertRaisesRegex(ValueError, 'Invalid workload_id'):
+      compare.load_entries(spec, 'proj', cache_dir=cache_dir)
+    with self.assertRaisesRegex(ValueError, 'Invalid workload_id'):
+      compare.load_jobset(
+          spec,
+          'proj',
+          datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+          cache_dir=cache_dir,
+      )
 
   def test_unreadable_cache_is_fetched_again(self):
     cache_dir = self.create_tempdir()

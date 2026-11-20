@@ -1,23 +1,33 @@
 # Goodput timeline and run comparison
 
-## Create a virtual env and install some deps
+The goodput timeline renders the goodput logs of a workload, as written by
+`ml-goodput-measurement`, as an HTML page: Goodput, disruptions and the
+breakdown of each recovery, on a timeline of the workload's runs. `compare`
+puts several workloads side by side.
+
+## Install
+
 ```
-python -m venv goodput-mttr
-source goodput-mttr/bin/activate
-pip install -r requirements.txt
+python -m venv goodput-timeline
+source goodput-timeline/bin/activate
+pip install "ml-goodput-measurement[timeline]"
 ```
 
-The commands below run blaze from this directory. `blaze run` does not run the
-tool in the current directory, so pass absolute paths (`$(pwd)/...`). The tool
-creates `outputs/compare` and `outputs/timeline` in the current directory when
-they are missing, and caches the logs that it reads from Cloud Logging in
-`outputs/cache` (see "Log cache" at the end).
+The tool reads the logs from Cloud Logging with Application Default Credentials
+(for example, after `gcloud auth application-default login`), so the account
+needs read access to the logs of the workload's project.
+
+The commands below run the tool with
+`python -m ml_goodput_measurement.timeline`. It creates `outputs/compare` and
+`outputs/timeline` in the current directory when they are missing, and caches
+the logs that it reads from Cloud Logging in `outputs/cache` (see "Log cache"
+at the end).
 
 ## Confirm Goodput logs exist for the workload and project of interest.
 
 ```
 export PROJECT=my-gcp-project
-blaze run :main -- --command=list --project_id=$PROJECT
+python -m ml_goodput_measurement.timeline --command=list --project_id=$PROJECT
 ```
 
 ## Run export.
@@ -33,12 +43,12 @@ export WORKLOAD=resize-4x1k-2
 export START=2026-01-23T15:45:06-08:00
 export END=2026-01-26T06:25:46-08:00
 
-blaze run :main -- --command=export \
+python -m ml_goodput_measurement.timeline --command=export \
 --project_id=$PROJECT \
 --workload_id=$WORKLOAD \
 --start_time=$START \
 --end_time=$END \
---output_path="$(pwd)/outputs/timeline/${PROJECT}_${WORKLOAD}_timeline.html"
+--output_path="outputs/timeline/${PROJECT}_${WORKLOAD}_timeline.html"
 ```
 
 ### Or from a local JSON file of log entries.
@@ -48,16 +58,17 @@ or from a cache file (see "Log cache"), without querying Cloud Logging. The
 workload id defaults to the file name.
 
 ```
-blaze run :main -- --command=export \
---entries_path=$(pwd)/outputs/cache/${WORKLOAD}.json \
---output_path=$(pwd)/outputs/timeline/${WORKLOAD}_timeline.html
+python -m ml_goodput_measurement.timeline --command=export \
+--entries_path=outputs/cache/${WORKLOAD}.json \
+--output_path=outputs/timeline/${WORKLOAD}_timeline.html
 ```
 
 ### What the timeline page shows.
 
 *   **Workload Metrics & Recovery Summary**: Goodput (preserved productive
-    time / total job time, from the cloud_goodput library), disruptions and
-    MTBI, mean MTTR and its breakdown into the 10 recovery sub-phases.
+    time / total job time, from the ml-goodput-measurement library),
+    disruptions and MTBI, mean MTTR and its breakdown into the 10 recovery
+    sub-phases.
 *   **Workload Overview**: a Gantt chart of all runs (Stepping, Startup /
     Recovery, Interruption) with the sub-events overlaid, and below it, on the
     same time axis:
@@ -116,11 +127,11 @@ Compare the workloads of a config. `--compare_csv_path` also writes the table
 as a CSV file:
 
 ```
-blaze run //third_party/py/cloud_goodput/ml_goodput_measurement/timeline:main -- \
+python -m ml_goodput_measurement.timeline \
   --command=compare \
-  --compare_config=$(pwd)/comparison_grouped.json \
-  --output_path=$(pwd)/outputs/compare/comparison.html \
-  --compare_csv_path=$(pwd)/outputs/compare/comparison.csv
+  --compare_config=comparison_grouped.json \
+  --output_path=outputs/compare/comparison.html \
+  --compare_csv_path=outputs/compare/comparison.csv
 ```
 
 When `--output_path` or `--compare_csv_path` is a directory, or `--output_path`
@@ -128,11 +139,11 @@ is not given, the file is named `comparison_<yyyymmddhhmm>.html` or `.csv`
 after the current time, so every run keeps its output:
 
 ```
-blaze run //third_party/py/cloud_goodput/ml_goodput_measurement/timeline:main -- \
+python -m ml_goodput_measurement.timeline \
   --command=compare \
-  --compare_config=$(pwd)/comparison_grouped.json \
-  --output_path=$(pwd)/outputs/compare/ \
-  --compare_csv_path=$(pwd)/outputs/compare/
+  --compare_config=comparison_grouped.json \
+  --output_path=outputs/compare/ \
+  --compare_csv_path=outputs/compare/
 ```
 
 Other flags:

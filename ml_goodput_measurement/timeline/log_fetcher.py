@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Cloud Logging query helpers for Goodput Timeline workloads."""
 
 import collections
@@ -18,6 +32,20 @@ QUOTA_RETRY_WAITS_S = (5, 10, 20)
 # The Cloud Logging client library adds an entry with only this payload key
 # (its name and version) to the goodput logs; it has no goodput data.
 _NO_DIAGNOSTIC_FILTER = 'NOT jsonPayload."logging.googleapis.com/diagnostic":*'
+
+
+def check_workload_id(workload_id: str) -> None:
+  """Raises ValueError unless workload_id has only letters, digits, _ and -.
+
+  The workload id is used in Cloud Logging filters and in cache file names.
+
+  Args:
+    workload_id: Workload ID.
+  """
+  if not isinstance(workload_id, str) or not _WORKLOAD_ID_RE.fullmatch(
+      workload_id
+  ):
+    raise ValueError(f'Invalid workload_id {workload_id!r}')
 
 
 def is_quota_error(e: Exception) -> bool:
@@ -76,10 +104,7 @@ def fetch_log_entries(
   Returns:
     (timestamp, payload) per entry; the timestamp is ISO 8601, '' if unset.
   """
-  if not _WORKLOAD_ID_RE.match(workload_id):
-    raise ValueError(
-        f'Invalid workload_id {workload_id!r}'
-    )
+  check_workload_id(workload_id)
 
   log_name = f'projects/{project_id}/logs/goodput_{workload_id}'
   log_name_pw = f'projects/{project_id}/logs/goodput_pw-{workload_id}'
@@ -180,8 +205,7 @@ def fetch_jobset_create(
   Returns:
     The protoPayload of the newest matching entry, or None.
   """
-  if not _WORKLOAD_ID_RE.match(workload_id):
-    raise ValueError(f'Invalid workload_id {workload_id!r}')
+  check_workload_id(workload_id)
   names = (workload_id, f'pw-{workload_id}')
   activity = f'projects/{project_id}/logs/cloudaudit.googleapis.com%2Factivity'
   filters = [

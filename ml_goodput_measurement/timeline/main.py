@@ -1,4 +1,19 @@
-import argparse
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Command line tool: goodput timeline export, workload list and comparison."""
+
 import datetime
 import os
 import sys
@@ -100,7 +115,7 @@ def _compare() -> None:
   config = compare.load_config(FLAGS.compare_config)
 
   specs = config.workloads
-  project_id = _project_id(required=False)
+  project_id = _project_id()
   no_project = [
       s.workload_id
       for s in specs
@@ -171,10 +186,15 @@ def _compare() -> None:
     print(f'CSV written to {csv_path}')
 
 
-def _project_id(required: bool) -> Optional[str]:
+def _project_id() -> Optional[str]:
   """--project_id, else the GOOGLE_CLOUD_PROJECT environment variable."""
-  project_id = FLAGS.project_id or os.environ.get('GOOGLE_CLOUD_PROJECT')
-  if required and not project_id:
+  return FLAGS.project_id or os.environ.get('GOOGLE_CLOUD_PROJECT')
+
+
+def _required_project_id() -> str:
+  """_project_id(), or a usage error when neither is set."""
+  project_id = _project_id()
+  if not project_id:
     raise app.UsageError(
         '--project_id or the GOOGLE_CLOUD_PROJECT environment variable must be'
         ' set to read logs from Cloud Logging.'
@@ -209,7 +229,7 @@ def _ensure_output_dirs() -> None:
 def main(argv: list[str]) -> None:
   _ensure_output_dirs()
   if FLAGS.command == 'list':
-    project_id = _project_id(required=True)
+    project_id = _required_project_id()
     workloads = log_fetcher.list_workloads(project_id)
     if not workloads:
       print('No workloads with goodput logs found.')
@@ -242,7 +262,7 @@ def main(argv: list[str]) -> None:
               start_time=FLAGS.start_time,
               end_time=FLAGS.end_time,
           ),
-          _project_id(required=True),
+          _required_project_id(),
           cache_dir=_cache_dir(),
           refresh=FLAGS.refresh_cache,
       )
@@ -259,7 +279,3 @@ def main(argv: list[str]) -> None:
         segments, workload_id, FLAGS.output_path, entries=entries
     )
     print(f'Timeline written to {FLAGS.output_path}')
-
-
-if __name__ == '__main__':
-  app.run(main)

@@ -102,6 +102,20 @@ accelerator events.
 - [Elastic training](https://github.com/AI-Hypercomputer/ml-goodput-measurement/blob/main/docs/elastic.md): Pathways, slice-down and scale-up
 - [Troubleshooting](https://github.com/AI-Hypercomputer/ml-goodput-measurement/blob/main/docs/troubleshooting.md)
 
+## Goodput timeline
+
+The goodput timeline renders a workload's goodput logs as an HTML page:
+Goodput, disruptions and the breakdown of each recovery on a timeline of the
+workload's runs. Its `compare` command puts several workloads side by side.
+
+```bash
+pip install "ml-goodput-measurement[timeline]"
+python -m ml_goodput_measurement.timeline --command=list --project_id=my-gcp-project
+```
+
+See the
+[timeline README](https://github.com/AI-Hypercomputer/ml-goodput-measurement/blob/main/ml_goodput_measurement/timeline/README.md).
+
 ## Integrations
 
 - [MaxText](https://github.com/AI-Hypercomputer/maxtext) (JAX): reference

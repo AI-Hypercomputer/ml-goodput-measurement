@@ -25,6 +25,11 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 ### Added
 
+* Goodput timeline and cross-run comparison tool,
+  `python -m ml_goodput_measurement.timeline`: renders a workload's goodput
+  logs as an HTML timeline with its recovery breakdown, and compares workloads
+  side by side. Install it with `pip install "ml-goodput-measurement[timeline]"`
+  and see `ml_goodput_measurement/timeline/README.md`.
 * `GoodputRecorder.record_checkpoint_save_stats(...)` and
   `record_checkpoint_restore_stats(...)`: public methods that write the same
   checkpoint entries Orbax writes, so non-Orbax checkpointers (for example

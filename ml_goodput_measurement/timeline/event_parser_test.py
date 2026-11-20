@@ -1,3 +1,19 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for event_parser, builder, metrics and renderer."""
+
 from unittest import mock
 
 from absl.testing import absltest
@@ -409,6 +425,20 @@ class MetricsTest(absltest.TestCase):
     self.assertIn('Goodput unavailable: KeyError', html_div)
     self.assertIn('Disruptions &amp; MTBI', html_div)
     self.assertNotIn('Error calculating metrics', html_div)
+
+  def test_html_file_escapes_workload_id(self):
+    entries = [
+        {'job_start_time': 100.0},
+        {'step_count': 0, 'step_start_time': 110.0},
+        {'job_end_time': 140.0},
+    ]
+    segments = builder.build_timeline(event_parser.parse_entries(entries))
+    path = self.create_tempfile().full_path
+    renderer.to_html_file(segments, 'wl<b>', path, entries=entries)
+    with open(path, encoding='utf-8') as f:
+      page = f.read()
+    self.assertIn('<title>Goodput Events Timeline - wl&lt;b&gt;</title>', page)
+    self.assertIn('Goodput Events Timeline &mdash; wl&lt;b&gt;</h1>', page)
 
   def test_calculate_goodput_metrics_elastic(self):
     entries = [

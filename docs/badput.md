@@ -198,6 +198,12 @@ of this window.
 This API also returns the last step recorded for the job. the total job time in
 this window and the number of disruptions within the interval window.
 
+Consecutive queries whose window slides forward are read incrementally with the
+same overlap window and `insertId` de-duplication as cumulative queries
+(`read_overlap_seconds`, `read_lag_seconds`; see [Monitoring](monitoring.md));
+other queries read the whole window. Either way, entries that become visible
+late are picked up.
+
 > **_IMPORTANT:_** **Use this API if** you know the exact window of time within
  the workload's total run time that you are interested in.
 

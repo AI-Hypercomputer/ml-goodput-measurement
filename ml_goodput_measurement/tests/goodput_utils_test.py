@@ -48,6 +48,31 @@ class GoodputUtilsTest(absltest.TestCase):
     result = goodput_utils.get_cluster_name()
     self.assertIsNone(result)
 
+  @mock.patch.object(goodput_utils, 'get_gcp_metadata')
+  def test_get_accelerator_type(self, mock_get_metadata):
+    """Maps GCE machine types to accelerator labels."""
+    expected_accelerator_types = {
+        'a3-highgpu-8g': 'NVIDIA-H100',
+        'a4-highgpu-8g': 'NVIDIA-B200',
+        'a4x-highgpu-4g': 'NVIDIA-GB200',
+        'a4x-maxgpu-4g-metal': 'NVIDIA-GB300',
+        'a5x-highgpu-4g-metal': 'NVIDIA-VR200',
+        'a9-highgpu-8g': 'GPU',  # Hypothetical unmapped GPU machine type.
+        'n2-standard-8': 'UNKNOWN',
+    }
+    for machine_type, expected in expected_accelerator_types.items():
+      with self.subTest(machine_type=machine_type):
+        mock_get_metadata.return_value = (
+            f'projects/123456789/machineTypes/{machine_type}'
+        )
+        self.assertEqual(goodput_utils.get_accelerator_type(), expected)
+
+  @mock.patch.object(goodput_utils, 'get_gcp_metadata')
+  def test_get_accelerator_type_without_metadata(self, mock_get_metadata):
+    """Returns UNKNOWN when the machine type is unavailable."""
+    mock_get_metadata.return_value = None
+    self.assertEqual(goodput_utils.get_accelerator_type(), 'UNKNOWN')
+
   @mock.patch('requests.Session')
   def test_get_gcp_metadata_success(self, mock_session_cls):
     """Tests metadata fetching success."""

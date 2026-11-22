@@ -36,6 +36,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   PyTorch Distributed Checkpoint) can report
   `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` / `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`.
   They replace the no-op `record_checkpoint_progress` stub.
+* Accelerator type labels for A4, A4X, A4X Max, and A5X GPU machine types.
 
 ### Deprecated
 

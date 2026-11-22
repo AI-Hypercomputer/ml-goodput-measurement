@@ -32,6 +32,10 @@ MACHINE_TYPE_TO_ACCELERATOR_TYPE_MAPPING = {
     'a3-highgpu': 'NVIDIA-H100',
     'a3-megagpu': 'NVIDIA-H100',
     'a3-ultragpu': 'NVIDIA-H200',
+    'a4-highgpu': 'NVIDIA-B200',
+    'a4x-highgpu': 'NVIDIA-GB200',
+    'a4x-maxgpu': 'NVIDIA-GB300',
+    'a5x-highgpu': 'NVIDIA-VR200',
     'a2': 'NVIDIA-A100',
     'gpu': 'GPU',
 }

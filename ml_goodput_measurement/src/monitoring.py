@@ -12,6 +12,8 @@ from multiprocessing import synchronize
 import os
 import threading
 import time
+from typing import Any
+import warnings
 
 from cloud_goodput.ml_goodput_measurement.src import gcp_metrics
 from cloud_goodput.ml_goodput_measurement.src import goodput
@@ -35,6 +37,7 @@ _TENSORBOARD_GCS_SUBDIR = 'goodput'
 _TENSORBOARD_GOODPUT_LABEL = 'goodput'
 _TENSORBOARD_BADPUT_LABEL = 'badput'
 _TENSORBOARD_STEP_DEVIATION_LABEL = 'step_deviation'
+_STEP_DEVIATION_CACHE_SUBDIR = 'step_deviation'
 _PROCESS_TERMINATION_TIMEOUT_SECONDS = 10
 _JOB_END_POLL_INTERVAL_SECONDS = 1.0
 
@@ -128,7 +131,8 @@ def _wait_for_job_end_entry(
     time.sleep(min(_JOB_END_POLL_INTERVAL_SECONDS, remaining))
     try:
       calculator.get_job_goodput(
-          include_badput_breakdown=config['include_badput_breakdown']
+          include_badput_breakdown=config['include_badput_breakdown'],
+          configured_ideal_step_time=config.get('configured_ideal_step_time'),
       )
     except Exception as e:  # pylint: disable=broad-exception-caught
       logger.warning(
@@ -953,11 +957,13 @@ class GoodputMonitor:
       include_badput_breakdown: Whether to query and upload badput breakdown
         data to Tensorboard.
       include_step_deviation: Whether to query and upload step deviation data to
-        Tensorboard.
+        Tensorboard. Only used by the deprecated
+        `start_step_deviation_uploader`; `start_goodput_uploader` uploads the
+        step time deviation to Google Cloud Monitoring regardless.
       configured_ideal_step_time: The optional ideal step time configured by the
         user.
       step_deviation_interval_seconds: The interval to query step deviation
-        data.
+        data in the deprecated `start_step_deviation_uploader`.
       gcp_options: The options for Google Cloud Monitoring.
       skip_final_flush: Whether to skip the final goodput metrics flush upon
         termination.
@@ -974,7 +980,8 @@ class GoodputMonitor:
         completes (the legacy behavior). Has no effect if skip_final_flush is
         True.
       gcs_sync_interval_seconds: The interval to sync the cache to GCS.
-      cache_dir: Local directory to store the cache files.
+      cache_dir: Local directory to store the cache files. The deprecated
+        `start_step_deviation_uploader` uses its `step_deviation` subdirectory.
       max_logs_retention_period: The maximum retention period for Cloud Logging
         logs. If not set, defaults to 7 days.
       wait_for_job_end_seconds: How long the final flush may wait, polling about
@@ -1267,8 +1274,39 @@ class GoodputMonitor:
           e,
       )
 
+  def _step_deviation_worker_config(self) -> dict[str, Any]:
+    """Returns the worker config with a cache directory for step deviation.
+
+    Step deviation queries append the Cloud Logging entries they read to the
+    cached timeline. Appending to the goodput uploader's timeline would add
+    every entry twice, and the calculator counts a repeated step as a
+    disruption.
+    """
+    return dict(
+        self._worker_config,
+        cache_dir=os.path.join(
+            self._worker_config['cache_dir'], _STEP_DEVIATION_CACHE_SUBDIR
+        ),
+    )
+
   def start_step_deviation_uploader(self):
-    """Starts the step deviation uploader process."""
+    """Starts the step deviation uploader process.
+
+    Deprecated: `start_goodput_uploader` already uploads the step time deviation
+    and the ideal step time to Google Cloud Monitoring. This uploader only adds
+    per-step deviation scalars in Tensorboard, and it writes the average step
+    deviation to `workload/performance`, which conflicts with the ideal step
+    time written by the goodput uploader.
+    """
+    message = (
+        'start_step_deviation_uploader is deprecated: start_goodput_uploader'
+        ' already uploads the step time deviation and the ideal step time to'
+        ' Google Cloud Monitoring, and running both writes two different'
+        ' values to workload/performance.'
+    )
+    warnings.warn(message, DeprecationWarning, stacklevel=2)
+    # DeprecationWarning is hidden by default outside __main__.
+    logger.warning(message)
     if (
         not self._initialized
         or not self._worker_config['include_step_deviation']
@@ -1289,7 +1327,7 @@ class GoodputMonitor:
     self._step_deviation_process = multiprocessing.Process(
         target=_step_deviation_worker,
         args=(
-            self._worker_config,
+            self._step_deviation_worker_config(),
             self._step_deviation_termination_event,
             self._step_deviation_final_flush_event,
         ),
@@ -1354,7 +1392,9 @@ class GoodputMonitor:
   def _final_step_deviation_query_and_upload(self):
     """Performs a final step deviation query and upload."""
     try:
-      calculator = self._goodput_calculator
+      calculator = _create_goodput_calculator(
+          self._step_deviation_worker_config()
+      )
       step_dev = calculator.get_step_deviation(
           self._worker_config['configured_ideal_step_time']
       )

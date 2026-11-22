@@ -37,6 +37,23 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` / `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`.
   They replace the no-op `record_checkpoint_progress` stub.
 
+### Deprecated
+
+* `GoodputMonitor.start_step_deviation_uploader()`: `start_goodput_uploader()`
+  already uploads the step time deviation and the ideal step time to Google
+  Cloud Monitoring, and running both writes two different values to
+  `workload/performance`. Calling it now emits a `DeprecationWarning` and logs
+  a warning.
+
+### Fixed
+
+* The step deviation uploader keeps its own cache in
+  `{cache_dir}/step_deviation`. It shared the goodput uploader's cache, which
+  then held every entry twice, and the calculator counted the repeated steps as
+  disruptions.
+* The final flush's wait for the job end entry passes
+  `configured_ideal_step_time` to its queries.
+
 ## [0.2.5] - 2026-11-12
 
 ### Fixed

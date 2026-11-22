@@ -4,6 +4,7 @@ This module tests the GoodputMonitor class and its functionality, specifically
 the uploading of step deviation, goodput and badput data to Tensorboard.
 """
 
+import os
 import threading
 import time
 from unittest import mock
@@ -1031,6 +1032,98 @@ class GoodputMonitorTests(absltest.TestCase):
     self.assertFalse(goodput_monitor._step_deviation_process.is_alive())
     self.assertIsNone(goodput_monitor._step_deviation_process)
     self.assertTrue(goodput_monitor._step_deviation_termination_event.is_set())
+
+  def test_start_step_deviation_uploader_is_deprecated(self):
+    goodput_monitor = GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=False,
+    )
+    with self.assertWarns(DeprecationWarning):
+      with self.assertLogs(monitoring.logger, level='WARNING') as logs:
+        goodput_monitor.start_step_deviation_uploader()
+    self.assertLen(logs.output, 1)
+    self.assertIn('start_step_deviation_uploader is deprecated', logs.output[0])
+
+  def _create_step_deviation_monitor(self, cache_dir: str) -> GoodputMonitor:
+    return GoodputMonitor(
+        self.job_name,
+        self.logger_name,
+        self.tensorboard_dir,
+        upload_interval=_TEST_UPLOAD_INTERVAL,
+        monitoring_enabled=True,
+        include_step_deviation=True,
+        gcp_options=GCPOptions(
+            enable_gcp_goodput_metrics=False,
+            enable_gcp_step_deviation_metrics=False,
+        ),
+        cache_dir=cache_dir,
+    )
+
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_step_deviation_uploader_uses_separate_cache_dir(
+      self, mock_logger_client, mock_summary_writer
+  ):
+    """The step deviation worker does not append to the goodput timeline."""
+    mock_logger_client.return_value = MagicMock()
+    mock_summary_writer.return_value = MagicMock()
+    cache_dir = self.create_tempdir().full_path
+    goodput_monitor = self._create_step_deviation_monitor(cache_dir)
+
+    with patch.object(monitoring.multiprocessing, 'Process') as mock_process:
+      with self.assertWarns(DeprecationWarning):
+        goodput_monitor.start_step_deviation_uploader()
+    goodput_monitor._step_deviation_process = None
+
+    worker_config = mock_process.call_args.kwargs['args'][0]
+    self.assertEqual(
+        worker_config['cache_dir'], os.path.join(cache_dir, 'step_deviation')
+    )
+    self.assertEqual(goodput_monitor._worker_config['cache_dir'], cache_dir)
+
+  @patch('tensorboardX.writer.SummaryWriter')
+  @patch('google.cloud.logging.Client')
+  def test_final_step_deviation_query_uses_separate_cache_dir(
+      self, mock_logger_client, mock_summary_writer
+  ):
+    """Without a worker, the final step deviation query uses its own cache."""
+    mock_logger_client.return_value = MagicMock()
+    mock_summary_writer.return_value = MagicMock()
+    cache_dir = self.create_tempdir().full_path
+    goodput_monitor = self._create_step_deviation_monitor(cache_dir)
+
+    with patch.object(monitoring, '_create_goodput_calculator') as mock_create:
+      mock_create.return_value.get_step_deviation.return_value = {1: 0.5}
+      goodput_monitor.stop_step_deviation_uploader()
+
+    mock_create.assert_called_once()
+    self.assertEqual(
+        mock_create.call_args.args[0]['cache_dir'],
+        os.path.join(cache_dir, 'step_deviation'),
+    )
+    mock_create.return_value.get_step_deviation.assert_called_once_with(None)
+
+  def test_job_end_poll_uses_configured_ideal_step_time(self):
+    """The job-end poll passes the configured ideal step time."""
+    calculator = MagicMock()
+    calculator.has_job_end_entry.side_effect = [False, True]
+    self._patch_monitoring_clock()
+    monitoring._wait_for_job_end_entry(
+        calculator,
+        {
+            'job_name': self.job_name,
+            'include_badput_breakdown': False,
+            'wait_for_job_end_seconds': 2,
+            'configured_ideal_step_time': 2.5,
+        },
+        pid=0,
+    )
+    calculator.get_job_goodput.assert_called_once_with(
+        include_badput_breakdown=False, configured_ideal_step_time=2.5
+    )
 
   @patch('google.cloud.monitoring_v3.MetricServiceClient')
   @patch('tensorboardX.writer.SummaryWriter')

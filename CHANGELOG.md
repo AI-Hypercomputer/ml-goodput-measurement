@@ -37,6 +37,13 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
   `UNPRODUCTIVE_CHECKPOINT_SAVE_TIME` / `UNPRODUCTIVE_CHECKPOINT_RESTORE_TIME`.
   They replace the no-op `record_checkpoint_progress` stub.
 
+### Changed
+
+* Requires Python 3.10 or newer (`requires-python = ">=3.10"`); the Python 3.8
+  and 3.9 classifiers are removed. The library already uses `X | None`
+  (PEP 604) annotations in function signatures, so it could not be imported on
+  Python 3.8 or 3.9.
+
 ### Deprecated
 
 * `GoodputMonitor.start_step_deviation_uploader()`: `start_goodput_uploader()`

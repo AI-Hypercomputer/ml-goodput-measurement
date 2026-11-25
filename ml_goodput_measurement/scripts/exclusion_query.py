@@ -3,7 +3,7 @@
 Instructions
 
 Environment Setup:
-  - Ensure Python 3.9+ is installed.
+  - Ensure Python 3.10+ is installed.
   - Install the Goodput library:
     $ pip install ml-goodput-measurement>=0.0.16
 

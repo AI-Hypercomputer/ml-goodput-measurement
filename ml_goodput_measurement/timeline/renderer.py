@@ -18,7 +18,7 @@ import bisect
 import collections
 import datetime
 import html as html_lib
-from typing import Any, NamedTuple, Optional, Sequence, Union
+from typing import Any, Callable, NamedTuple, Optional, Sequence, TypeVar, Union
 
 from cloud_goodput.ml_goodput_measurement.timeline import builder
 from cloud_goodput.ml_goodput_measurement.timeline import event_parser
@@ -1557,44 +1557,121 @@ def build_figure(segments: list[builder.Segment], title: str) -> go.Figure:
   return fig
 
 
+_NA = 'N/A'
+# Shown under a KPI card whose metric failed; the error is in the Warnings box.
+_SEE_WARNINGS = '<a href="#warnings" style="color:inherit;">See Warnings</a>'
+
+_T = TypeVar('_T')
+
+
+def _metric_or_warn(
+    label: str,
+    compute: Callable[[], _T],
+    warnings: list[tuple[str, str]],
+) -> Optional[_T]:
+  """Returns compute(), or None after adding its error to `warnings`.
+
+  A metric that fails shows N/A in its card and its error in the Warnings box,
+  instead of a misleading 0 or the other metrics being dropped.
+
+  Args:
+    label: The metric, e.g. 'Goodput'; the first part of the warning.
+    compute: Computes the metric.
+    warnings: (label, error) pairs to append to.
+
+  Returns:
+    The metric, or None if compute raised.
+  """
+  try:
+    return compute()
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    warnings.append((label, f'{type(e).__name__}: {e}'))
+    return None
+
+
+def _duration_or_na(seconds: Optional[float]) -> str:
+  return _NA if seconds is None else _fmt_duration(seconds)
+
+
+def _build_warnings_html(warnings: Sequence[tuple[str, str]]) -> str:
+  """Builds the Warnings box listing every metric error; '' if none."""
+  if not warnings:
+    return ''
+  items = ''.join(
+      '<li style="margin:0.3rem 0;"><b>'
+      f'{html_lib.escape(label)}</b>: <code style="font-size:0.8rem;'
+      ' background:#fee2e2; padding:1px 5px; border-radius:4px;'
+      ' white-space:pre-wrap; word-break:break-word;">'
+      f'{html_lib.escape(error)}</code></li>'
+      for label, error in warnings
+  )
+  n = len(warnings)
+  return (
+      '<div id="warnings" class="warnings-box" role="alert" style="margin:'
+      ' 0.5rem 0 1.25rem; padding: 1rem 1.25rem; border: 1px solid #fca5a5;'
+      ' border-left: 6px solid #dc2626; border-radius: 10px; background:'
+      ' #fef2f2;">'
+      '<div style="font-size: 0.95rem; font-weight: 700; color: #991b1b;'
+      ' margin-bottom: 0.35rem;">\u26a0 '
+      f'{n} warning{"s" if n != 1 else ""}: some metrics are unavailable'
+      ' (N/A)</div>'
+      '<ul style="margin: 0; padding-left: 1.25rem; color: #7f1d1d;'
+      f' font-size: 0.85rem; line-height: 1.45;">{items}</ul>'
+      '</div>'
+  )
+
+
 def _build_summary_html(
     segments: list[builder.Segment],
     workload_id: str,
     entries: Union[list[dict[str, Any]], pd.DataFrame],
-    rec_stats: Optional[metrics.RecoverySummaryStats] = None,
+    rec_stats: Optional[metrics.RecoverySummaryStats],
+    warnings: list[tuple[str, str]],
 ) -> str:
-  """Builds a 5-KPI banner and breakdown table with inline bars."""
+  """Builds a 5-KPI banner and breakdown table with inline bars.
+
+  Each metric is computed on its own: one that fails shows N/A and adds its
+  error to `warnings`, and the other metrics are still shown.
+
+  Args:
+    segments: The workload timeline.
+    workload_id: The workload, for the Goodput calculation.
+    entries: Goodput log payloads, or a DataFrame of LogRecords.
+    rec_stats: The recovery incidents; None if they could not be extracted.
+    warnings: (label, error) pairs; the errors of the metrics are appended.
+
+  Returns:
+    The summary HTML; '' if it could not be built, with the error in
+    `warnings`.
+  """
   try:
-    goodput_error = ''
-    try:
-      goodput_val, _, last_step, total_job_time = (
-          metrics.calculate_goodput_metrics(entries, workload_id)
-      )
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      # Keep the other metrics; the Goodput card shows the error, not 0%.
-      goodput_error = f'{type(e).__name__}: {e}'
-      goodput_val, last_step, total_job_time = 0.0, 0, 0.0
-    timeline_metrics = metrics.calculate_timeline_metrics(segments)
-    mtbi = timeline_metrics['mtbi']
+    goodput = _metric_or_warn(
+        'Goodput',
+        lambda: metrics.calculate_goodput_metrics(entries, workload_id),
+        warnings,
+    )
+    timeline_metrics = _metric_or_warn(
+        'MTBI / MTTR',
+        lambda: metrics.calculate_timeline_metrics(segments),
+        warnings,
+    )
+    mtbi = timeline_metrics['mtbi'] if timeline_metrics else None
+    rec_ok = rec_stats is not None
     if rec_stats is None:
-      rec_stats = metrics.extract_recovery_incidents(entries, segments)
+      rec_stats = metrics.RecoverySummaryStats()
 
-    productive_s = (
-        (goodput_val / 100.0) * total_job_time if total_job_time > 0 else 0.0
-    )
-
-    mttr_val = (
-        rec_stats.mean_mttr_s
-        if rec_stats.num_incidents > 0
-        else timeline_metrics['mttr']
-    )
-    if rec_stats.num_incidents > 0:
+    if rec_ok and rec_stats.num_incidents > 0:
+      mttr_val = rec_stats.mean_mttr_s
       jit_mean = rec_stats.phase_stats.get('jit_compile_overhead', {}).get(
           'mean', 0.0
       )
       downtime_val = rec_stats.mean_downtime_s + jit_mean
-    else:
+    elif rec_ok and timeline_metrics:
+      mttr_val = timeline_metrics['mttr']
       downtime_val = mttr_val
+    else:
+      mttr_val = None
+      downtime_val = None
 
     # Build Per-Recovery Incident MTTR Breakdown (10 sub-phases summing to 100%
     # of MTTR)
@@ -1651,40 +1728,75 @@ def _build_summary_html(
           f' style="padding:7px 10px; text-align:right;">{pct_cell}</td></tr>'
       )
 
-    downtime_pct = (downtime_val / mttr_val * 100.0) if mttr_val > 0 else 0.0
-    lost_pct = (
-        (rec_stats.mean_lost_progress_s / mttr_val * 100.0)
-        if mttr_val > 0
-        else 0.0
-    )
-
-    mttr_rows.append(
-        '<tr style="background:#eff6ff; font-weight:700; color:#1e40af;'
-        ' border-top:2px solid #3b82f6;"><td style="padding:9px 10px;">Total'
-        ' Time to Recover (MTTR)</td><td style="padding:9px 10px;'
-        ' text-align:right;'
-        f' font-variant-numeric:tabular-nums;">{_fmt_duration(mttr_val)}</td><td'
-        ' style="padding:9px 10px; text-align:right; font-size:0.8rem;'
-        f' font-variant-numeric:tabular-nums;">{_fmt_duration(rec_stats.min_mttr_s)}'
-        f' / {_fmt_duration(rec_stats.max_mttr_s)}</td><td style="padding:9px'
-        ' 10px; text-align:right;'
-        ' font-variant-numeric:tabular-nums;">100.0%</td></tr>'
-    )
-
-    if goodput_error:
-      goodput_text = 'n/a'
-      goodput_detail = f'Goodput unavailable: {html_lib.escape(goodput_error)}'
+    if mttr_val:
+      downtime_pct_text = f'{(downtime_val or 0.0) / mttr_val * 100.0:.1f}%'
+      lost_pct_text = (
+          f'{rec_stats.mean_lost_progress_s / mttr_val * 100.0:.1f}%'
+      )
+    elif mttr_val is None:
+      downtime_pct_text = lost_pct_text = _NA
     else:
+      downtime_pct_text = lost_pct_text = '0.0%'
+
+    if rec_ok:
+      mttr_rows.append(
+          '<tr style="background:#eff6ff; font-weight:700; color:#1e40af;'
+          ' border-top:2px solid #3b82f6;"><td style="padding:9px 10px;">Total'
+          ' Time to Recover (MTTR)</td><td style="padding:9px 10px;'
+          ' text-align:right;'
+          f' font-variant-numeric:tabular-nums;">{_duration_or_na(mttr_val)}</td><td'
+          ' style="padding:9px 10px; text-align:right; font-size:0.8rem;'
+          f' font-variant-numeric:tabular-nums;">{_fmt_duration(rec_stats.min_mttr_s)}'
+          f' / {_fmt_duration(rec_stats.max_mttr_s)}</td><td style="padding:9px'
+          ' 10px; text-align:right;'
+          ' font-variant-numeric:tabular-nums;">100.0%</td></tr>'
+      )
+    else:
+      mttr_rows = [
+          '<tr style="background:#fef2f2; color:#991b1b;"><td colspan="4"'
+          f' style="padding:9px 10px;">{_NA}: the recovery incidents could'
+          f' not be extracted. {_SEE_WARNINGS}.</td></tr>'
+      ]
+
+    # Goodput card: green with the value, red with N/A when it failed.
+    if goodput is not None:
+      goodput_val, _, last_step, total_job_time = goodput
+      productive_s = (
+          (goodput_val / 100.0) * total_job_time if total_job_time > 0 else 0.0
+      )
       goodput_text = f'{goodput_val:.2f}%'
       goodput_detail = (
           f'{_fmt_duration(productive_s)} preserved productive /'
           f' {_fmt_duration(total_job_time)} total job time &bull; Step'
           f' {last_step}'
       )
+      goodput_colors = ('#ecfdf5', '#a7f3d0', '#10b981', '#047857', '#065f46')
+    else:
+      goodput_text = _NA
+      goodput_detail = f'Goodput unavailable. {_SEE_WARNINGS}.'
+      goodput_colors = ('#fef2f2', '#fecaca', '#dc2626', '#b91c1c', '#991b1b')
+    g_bg, g_border, g_accent, g_title, g_text = goodput_colors
 
-    disruptions_label = f'{rec_stats.num_incidents} Disruption' + (
-        's' if rec_stats.num_incidents != 1 else ''
-    )
+    if rec_ok:
+      incidents_text = f'{rec_stats.num_incidents} Incidents'
+      disruptions_label = f'{rec_stats.num_incidents} Disruption' + (
+          's' if rec_stats.num_incidents != 1 else ''
+      )
+      mttr_min_max = (
+          f'Min: {_fmt_duration(rec_stats.min_mttr_s)} / Max:'
+          f' {_fmt_duration(rec_stats.max_mttr_s)}'
+      )
+      lost_text = _fmt_duration(rec_stats.mean_lost_progress_s)
+      lost_detail = (
+          f'Avg <b>{rec_stats.mean_rolled_back_steps:.1f} repeated steps</b>'
+          f' ({lost_pct_text} of MTTR)'
+      )
+    else:
+      incidents_text = _NA
+      disruptions_label = f'{_NA} Disruptions'
+      mttr_min_max = _SEE_WARNINGS
+      lost_text = _NA
+      lost_detail = _SEE_WARNINGS
 
     return f"""
 <div class="goodput-summary-box" style="margin: 0.5rem 0 1.5rem; padding: 1.35rem 1.5rem; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; box-shadow: 0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.02);">
@@ -1692,34 +1804,34 @@ def _build_summary_html(
 
   <!-- Top Row: 5 Executive KPI Cards -->
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 1.35rem;">
-    <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: #ecfdf5; border: 1px solid #a7f3d0; border-left: 4px solid #10b981;">
-      <div style="font-size: 0.72rem; font-weight: 700; color: #047857; text-transform: uppercase; letter-spacing: 0.04em;">Goodput %</div>
-      <div style="font-size: 1.6rem; font-weight: 800; color: #065f46; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{goodput_text}</div>
-      <div style="font-size: 0.76rem; color: #065f46;">{goodput_detail}</div>
+    <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: {g_bg}; border: 1px solid {g_border}; border-left: 4px solid {g_accent};">
+      <div style="font-size: 0.72rem; font-weight: 700; color: {g_title}; text-transform: uppercase; letter-spacing: 0.04em;">Goodput %</div>
+      <div style="font-size: 1.6rem; font-weight: 800; color: {g_text}; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{goodput_text}</div>
+      <div style="font-size: 0.76rem; color: {g_text};">{goodput_detail}</div>
     </div>
 
     <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #64748b;">
       <div style="font-size: 0.72rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em;">Disruptions &amp; MTBI</div>
-      <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{rec_stats.num_incidents} Incidents</div>
-      <div style="font-size: 0.76rem; color: #475569;">MTBI: <b>{_fmt_duration(mtbi)}</b> between disruptions</div>
+      <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{incidents_text}</div>
+      <div style="font-size: 0.76rem; color: #475569;">MTBI: <b>{_duration_or_na(mtbi)}</b> between disruptions</div>
     </div>
 
     <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #3b82f6;">
       <div style="font-size: 0.72rem; font-weight: 700; color: #1d4ed8; text-transform: uppercase; letter-spacing: 0.04em;">Total MTTR</div>
-      <div style="font-size: 1.6rem; font-weight: 800; color: #1e3a8a; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{_fmt_duration(mttr_val)}</div>
-      <div style="font-size: 0.76rem; color: #1e40af;">Time to Recover + Lost Progress &bull; Min: {_fmt_duration(rec_stats.min_mttr_s)} / Max: {_fmt_duration(rec_stats.max_mttr_s)}</div>
+      <div style="font-size: 1.6rem; font-weight: 800; color: #1e3a8a; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{_duration_or_na(mttr_val)}</div>
+      <div style="font-size: 0.76rem; color: #1e40af;">Time to Recover + Lost Progress &bull; {mttr_min_max}</div>
     </div>
 
     <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #475569;">
       <div style="font-size: 0.72rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em;">Time to Recover</div>
-      <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{_fmt_duration(downtime_val)}</div>
-      <div style="font-size: 0.76rem; color: #475569;">Phases 1\u20139 ({downtime_pct:.1f}% of MTTR)</div>
+      <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{_duration_or_na(downtime_val)}</div>
+      <div style="font-size: 0.76rem; color: #475569;">Phases 1\u20139 ({downtime_pct_text} of MTTR)</div>
     </div>
 
     <div style="padding: 0.9rem 1.05rem; border-radius: 10px; background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f59e0b;">
       <div style="font-size: 0.72rem; font-weight: 700; color: #b45309; text-transform: uppercase; letter-spacing: 0.04em;">Lost Progress</div>
-      <div style="font-size: 1.6rem; font-weight: 800; color: #92400e; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{_fmt_duration(rec_stats.mean_lost_progress_s)}</div>
-      <div style="font-size: 0.76rem; color: #92400e;">Avg <b>{rec_stats.mean_rolled_back_steps:.1f} repeated steps</b> ({lost_pct:.1f}% of MTTR)</div>
+      <div style="font-size: 1.6rem; font-weight: 800; color: #92400e; margin: 0.2rem 0; font-variant-numeric: tabular-nums;">{lost_text}</div>
+      <div style="font-size: 0.76rem; color: #92400e;">{lost_detail}</div>
     </div>
   </div>
 
@@ -1747,10 +1859,8 @@ def _build_summary_html(
 </div>
 """
   except Exception as e:  # pylint: disable=broad-exception-caught
-    return (
-        '<div class="error" style="color: red; margin-bottom: 20px;">Error'
-        f' calculating metrics: {html_lib.escape(str(e))}</div>'
-    )
+    warnings.append(('Metrics summary', f'{type(e).__name__}: {e}'))
+    return ''
 
 
 def _assemble_sections(
@@ -1759,8 +1869,22 @@ def _assemble_sections(
     include_plotlyjs: bool,
     entries: Optional[Union[list[dict[str, Any]], pd.DataFrame]] = None,
 ) -> str:
-  """Combines navigation, metrics summary, overview, and run sections."""
+  """Combines navigation, warnings, metrics summary, overview, and runs."""
   run_indices = sorted({s.run_idx for s in segments})
+
+  # (label, error) of each metric that could not be computed.
+  warnings: list[tuple[str, str]] = []
+  rec_stats = None
+  summary_html = ''
+  if entries is not None:
+    rec_stats = _metric_or_warn(
+        'Recovery incidents',
+        lambda: metrics.extract_recovery_incidents(entries, segments),
+        warnings,
+    )
+    summary_html = _build_summary_html(
+        segments, workload_id, entries, rec_stats, warnings
+    )
 
   nav_items = [
       '<span class="label">Jump to:</span>',
@@ -1772,22 +1896,29 @@ def _assemble_sections(
         '<span style="font-size:0.68rem;color:#64748b">'
         f' ({_run_label(run_idx)})</span></a>'
     )
-
-  parts = ['<nav>' + ''.join(nav_items) + '</nav>']
-
-  rec_stats = (
-      metrics.extract_recovery_incidents(entries, segments)
-      if entries is not None
-      else None
-  )
-
-  if entries is not None:
-    parts.append(
-        _build_summary_html(segments, workload_id, entries, rec_stats=rec_stats)
+  if warnings:
+    nav_items.append(
+        '<a href="#warnings" style="color:#b91c1c;border-color:#fca5a5;'
+        f'background:#fef2f2;">\u26a0 Warnings ({len(warnings)})</a>'
     )
 
+  parts = [
+      '<nav>' + ''.join(nav_items) + '</nav>',
+      _build_warnings_html(warnings),
+      summary_html,
+  ]
+
   overview_fig = build_overview_figure(
-      segments, workload_id, entries=entries, rec_stats=rec_stats
+      segments,
+      workload_id,
+      entries=entries,
+      # Without them (see Warnings), the hover texts leave out the recovery
+      # phases rather than extracting the incidents again.
+      rec_stats=(
+          metrics.RecoverySummaryStats()
+          if rec_stats is None and entries is not None
+          else rec_stats
+      ),
   )
   overview_div = overview_fig.to_html(
       full_html=False, include_plotlyjs=include_plotlyjs

@@ -422,8 +422,13 @@ class MetricsTest(absltest.TestCase):
         metrics, 'calculate_goodput_metrics', side_effect=KeyError('directory')
     ):
       html_div = renderer.to_html_div(segments, 'test-wl', entries=entries)
-    self.assertIn('Goodput unavailable: KeyError', html_div)
+    self.assertIn('id="warnings"', html_div)
+    self.assertIn('1 warning:', html_div)
+    self.assertIn('<b>Goodput</b>: <code', html_div)
+    self.assertIn('KeyError: &#x27;directory&#x27;', html_div)
+    self.assertIn('Goodput unavailable.', html_div)
     self.assertIn('Disruptions &amp; MTBI', html_div)
+    self.assertIn('0 Incidents', html_div)
     self.assertNotIn('Error calculating metrics', html_div)
 
   def test_html_file_escapes_workload_id(self):
@@ -439,6 +444,49 @@ class MetricsTest(absltest.TestCase):
       page = f.read()
     self.assertIn('<title>Goodput Events Timeline - wl&lt;b&gt;</title>', page)
     self.assertIn('Goodput Events Timeline &mdash; wl&lt;b&gt;</h1>', page)
+
+  def test_summary_lists_every_metric_error(self):
+    entries = [
+        {'job_start_time': 100.0},
+        {'step_count': 0, 'step_start_time': 110.0},
+        {'step_count': 1, 'step_start_time': 120.0},
+        {'job_end_time': 140.0},
+    ]
+    segments = builder.build_timeline(event_parser.parse_entries(entries))
+    with mock.patch.object(
+        metrics, 'calculate_goodput_metrics', side_effect=ValueError('zero')
+    ), mock.patch.object(
+        metrics,
+        'calculate_timeline_metrics',
+        side_effect=RuntimeError('<no windows>'),
+    ), mock.patch.object(
+        metrics, 'extract_recovery_incidents', side_effect=KeyError('step')
+    ):
+      html_div = renderer.to_html_div(segments, 'test-wl', entries=entries)
+    self.assertIn('3 warnings:', html_div)
+    self.assertIn('\u26a0 Warnings (3)', html_div)
+    self.assertIn('<b>Recovery incidents</b>', html_div)
+    self.assertIn('<b>Goodput</b>', html_div)
+    self.assertIn('<b>MTBI / MTTR</b>', html_div)
+    self.assertIn('ValueError: zero', html_div)
+    self.assertIn('RuntimeError: &lt;no windows&gt;', html_div)
+    self.assertNotIn('<no windows>', html_div)
+    # Every KPI card shows N/A and the page keeps its other sections.
+    self.assertIn('MTBI: <b>N/A</b>', html_div)
+    self.assertIn('the recovery incidents could not be extracted', html_div)
+    self.assertIn('Workload Overview', html_div)
+
+  def test_summary_without_errors_has_no_warnings(self):
+    entries = [
+        {'job_start_time': 100.0},
+        {'step_count': 0, 'step_start_time': 110.0},
+        {'step_count': 1, 'step_start_time': 120.0},
+        {'job_end_time': 140.0},
+    ]
+    segments = builder.build_timeline(event_parser.parse_entries(entries))
+    html_div = renderer.to_html_div(segments, 'test-wl', entries=entries)
+    self.assertNotIn('id="warnings"', html_div)
+    self.assertNotIn('N/A', html_div)
 
   def test_calculate_goodput_metrics_elastic(self):
     entries = [

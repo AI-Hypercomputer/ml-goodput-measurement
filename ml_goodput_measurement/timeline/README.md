@@ -65,6 +65,9 @@ python -m ml_goodput_measurement.timeline --command=export \
 
 ### What the timeline page shows.
 
+*   **Warnings**: shown only when a metric could not be computed, e.g. when
+    the ml-goodput-measurement library rejects the logs. It lists the error of
+    every such metric, and their cards show N/A instead of a misleading 0.
 *   **Workload Metrics & Recovery Summary**: Goodput (preserved productive
     time / total job time, from the ml-goodput-measurement library),
     disruptions and MTBI, mean MTTR and its breakdown into the 10 recovery

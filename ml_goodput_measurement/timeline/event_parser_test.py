@@ -1313,6 +1313,50 @@ class MetricsTest(absltest.TestCase):
     for h in part_hovers:
       self.assertNotIn('Occurs during', h)
 
+  def test_figures_keep_legend_below_title(self):
+    entries = [
+        {'job_start_time': 0.0},
+        {'tpu_init_start_time': 0.0},
+        {'tpu_init_end_time': 5.0},
+        {'step_count': 1, 'step_start_time': 10.0},
+        {'step_count': 2, 'step_start_time': 15.0},
+        {'job_end_time': 20.0},
+    ]
+    segments = builder.build_timeline(event_parser.parse_entries(entries))
+
+    # The title and the legend keep their offsets in pixels: 12px below the
+    # top, and 15px above the plot.
+    layout = renderer.build_figure(segments, 'Run 1').layout
+    plot_h = layout.height - layout.margin.t - layout.margin.b
+    self.assertAlmostEqual((1 - layout.title.y) * layout.height, 12)
+    self.assertEqual(layout.legend.yanchor, 'bottom')
+    self.assertAlmostEqual((layout.legend.y - 1) * plot_h, 15)
+    self.assertEqual(
+        layout.meta['fit_legend'],
+        {'min_top_px': layout.margin.t, 'title_top_px': 12, 'title_gap_px': 8},
+    )
+
+    # The overview's title is 14px below the top, and its legend 65px above
+    # the plot, over the range selector. It still lists its panels.
+    layout = renderer.build_overview_figure(
+        segments, 'wl', entries=entries
+    ).layout
+    plot_h = layout.height - layout.margin.t - layout.margin.b
+    self.assertAlmostEqual((1 - layout.title.y) * layout.height, 14)
+    self.assertEqual(layout.legend.yanchor, 'bottom')
+    self.assertAlmostEqual((layout.legend.y - 1) * plot_h, 65)
+    self.assertEqual(
+        layout.meta['fit_legend'],
+        {'min_top_px': layout.margin.t, 'title_top_px': 14, 'title_gap_px': 8},
+    )
+    self.assertIn('panels', layout.meta)
+
+    # On the page, the overview and the run's chart make room for a legend
+    # that wraps.
+    page = renderer.to_html_div(segments, 'wl', entries=entries)
+    self.assertEqual(page.count("gd.on('plotly_afterplot', fitLegend)"), 2)
+    self.assertNotIn('{plot_id}', page)
+
 
 class StepTimesTest(absltest.TestCase):
 

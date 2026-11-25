@@ -129,6 +129,7 @@ _OVERVIEW_ROW_ORDER = ['Stepping', 'Startup / Recovery', 'Interruption']
 # Overview figure geometry in pixels. The Gantt rows, legend, range selector,
 # range slider and title keep the sizes and offsets they had before the panels
 # below the rows were added (a 465px figure with 150px top and 45px bottom).
+# The top margin fits two rows of legend; _FIT_LEGEND_JS makes room for more.
 _OVERVIEW_TOP_PX = 150
 _OVERVIEW_BOTTOM_PX = 45
 _OVERVIEW_GANTT_PX = 270
@@ -139,6 +140,18 @@ _OVERVIEW_LEGEND_GAP_PX = 65
 _OVERVIEW_RANGESELECTOR_GAP_PX = 8
 _OVERVIEW_RANGESLIDER_PX = 19
 _OVERVIEW_TITLE_TOP_PX = 14
+# Per-run timeline geometry in pixels: a 100px plot, with the "Event Type"
+# legend 15px above it and the title 12px below the top of the figure.
+_RUN_TOP_PX = 95
+_RUN_BOTTOM_PX = 45
+_RUN_PLOT_PX = 100
+_RUN_LEGEND_GAP_PX = 15
+_RUN_TITLE_TOP_PX = 12
+# When the "Event Type" legend of the overview or of a run's timeline wraps
+# into more rows than the top margin fits, _FIT_LEGEND_JS makes the margin and
+# the figure taller, so that the legend stays at least this far below the
+# title.
+_FIT_LEGEND_TITLE_GAP_PX = 8
 # Step-time panel: steps slower than this multiple of their expected step time
 # (the baseline, or with fewer active elastic slices the step time measured
 # with them; see step_times.Baseline) are slow (the builder uses the same
@@ -271,6 +284,51 @@ _HTML_PAGE = """\
   </div>
 </body>
 </html>
+"""
+
+# Passed as `post_script` to `Figure.to_html` for a figure whose layout.meta
+# has `fit_legend` (see build_overview_figure and build_figure). The horizontal
+# legend sits above the plot and wraps into more rows as the page gets
+# narrower, growing upward into the title. After every redraw, including the
+# ones on window resizes, this moves the top of the plot down (or back up, but
+# not above `min_top_px`) by making the top margin and the figure taller by the
+# same amount, so the plot keeps its height, and keeps the title `title_top_px`
+# below the top.
+_FIT_LEGEND_JS = """\
+(function() {
+  var gd = document.getElementById('{plot_id}');
+  var fit = gd.layout.meta && gd.layout.meta.fit_legend;
+  if (!fit) {
+    return;
+  }
+  function fitLegend() {
+    var title = gd.querySelector('.gtitle');
+    var legend = gd.querySelector('.legend');
+    if (!title || !legend) {
+      return;
+    }
+    var shift = Math.ceil(
+        title.getBoundingClientRect().bottom + fit.title_gap_px -
+        legend.getBoundingClientRect().top);
+    var top = gd.layout.margin.t;
+    var newTop = Math.max(fit.min_top_px, top + shift);
+    // Ignore a 1px shrink, which could flip back and forth with rounding.
+    if (newTop === top || shift === -1) {
+      return;
+    }
+    var height = gd.layout.height + newTop - top;
+    // to_html gives the div the initial height; it must grow with the figure,
+    // or the figure would spill over what comes after it on the page.
+    gd.style.height = height + 'px';
+    Plotly.relayout(gd, {
+      'margin.t': newTop,
+      'height': height,
+      'title.y': 1 - fit.title_top_px / height,
+    });
+  }
+  gd.on('plotly_afterplot', fitLegend);
+  fitLegend();
+})();
 """
 
 
@@ -1210,7 +1268,15 @@ def build_overview_figure(
       paper_bgcolor='#ffffff',
       plot_bgcolor=_OVERVIEW_PLOT_BG_COLOR,
       height=height,
-      meta=dict(panels=[p.name for p in panels]),
+      meta=dict(
+          panels=[p.name for p in panels],
+          # Read by _FIT_LEGEND_JS.
+          fit_legend=dict(
+              min_top_px=_OVERVIEW_TOP_PX,
+              title_top_px=_OVERVIEW_TITLE_TOP_PX,
+              title_gap_px=_FIT_LEGEND_TITLE_GAP_PX,
+          ),
+      ),
       **yaxes,
   )
   return fig
@@ -1500,6 +1566,7 @@ def build_figure(segments: list[builder.Segment], title: str) -> go.Figure:
       griddash='dot',
       linecolor='#cbd5e1',
   )
+  height = _RUN_TOP_PX + _RUN_PLOT_PX + _RUN_BOTTOM_PX
   fig.update_layout(
       font=dict(
           family=(
@@ -1514,7 +1581,7 @@ def build_figure(segments: list[builder.Segment], title: str) -> go.Figure:
               ' style="font-size:12px;color:#475569;font-weight:normal">(Total'
               f' Span: {_fmt_duration(total_span)} / {total_span:.1f}s)</span>'
           ),
-          y=0.95,
+          y=1 - _RUN_TITLE_TOP_PX / height,
           x=0.0,
           xanchor='left',
           yanchor='top',
@@ -1528,7 +1595,7 @@ def build_figure(segments: list[builder.Segment], title: str) -> go.Figure:
       legend=dict(
           orientation='h',
           yanchor='bottom',
-          y=1.15,
+          y=1 + _RUN_LEGEND_GAP_PX / _RUN_PLOT_PX,
           xanchor='left',
           x=0,
           bgcolor='rgba(248, 250, 252, 0.92)',
@@ -1544,10 +1611,18 @@ def build_figure(segments: list[builder.Segment], title: str) -> go.Figure:
           ),
           align='left',
       ),
-      margin=dict(t=95, b=45, l=115, r=25),
+      margin=dict(t=_RUN_TOP_PX, b=_RUN_BOTTOM_PX, l=115, r=25),
       paper_bgcolor='#ffffff',
       plot_bgcolor='#f8fafc',
-      height=240,
+      height=height,
+      # Read by _FIT_LEGEND_JS.
+      meta=dict(
+          fit_legend=dict(
+              min_top_px=_RUN_TOP_PX,
+              title_top_px=_RUN_TITLE_TOP_PX,
+              title_gap_px=_FIT_LEGEND_TITLE_GAP_PX,
+          )
+      ),
   )
   fig.update_yaxes(
       fixedrange=True,
@@ -1921,7 +1996,9 @@ def _assemble_sections(
       ),
   )
   overview_div = overview_fig.to_html(
-      full_html=False, include_plotlyjs=include_plotlyjs
+      full_html=False,
+      include_plotlyjs=include_plotlyjs,
+      post_script=_FIT_LEGEND_JS,
   )
   panel_labels = {
       'step_time': 'Step Time vs. Baseline',
@@ -1985,7 +2062,9 @@ def _assemble_sections(
         )
 
     run_fig = build_figure(run_segs, run_title)
-    run_div = run_fig.to_html(full_html=False, include_plotlyjs=False)
+    run_div = run_fig.to_html(
+        full_html=False, include_plotlyjs=False, post_script=_FIT_LEGEND_JS
+    )
     parts.append(
         f'<section id="run-{run_idx}" class="section-card">'
         '<div class="section-header">'

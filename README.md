@@ -108,6 +108,10 @@ The goodput timeline renders a workload's goodput logs as an HTML page:
 Goodput, disruptions and the breakdown of each recovery on a timeline of the
 workload's runs. Its `compare` command puts several workloads side by side.
 
+![Goodput timeline overview of a workload with two interruptions](https://raw.githubusercontent.com/AI-Hypercomputer/ml-goodput-measurement/main/docs/images/timeline-overview.png)
+
+*Synthetic data.*
+
 ```bash
 pip install "ml-goodput-measurement[timeline]"
 python -m ml_goodput_measurement.timeline --command=list --project_id=my-gcp-project

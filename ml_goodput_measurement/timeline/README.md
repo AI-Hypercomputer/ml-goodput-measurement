@@ -5,6 +5,11 @@ The goodput timeline renders the goodput logs of a workload, as written by
 breakdown of each recovery, on a timeline of the workload's runs. `compare`
 puts several workloads side by side.
 
+![Workload overview: runs, recoveries and step times](../../docs/images/timeline-overview.png)
+
+*Synthetic data. The images in this README are rendered from
+[synthetic logs](../../docs/images/synthetic_logs/README.md).*
+
 ## Install
 
 ```
@@ -72,6 +77,11 @@ python -m ml_goodput_measurement.timeline --command=export \
     time / total job time, from the ml-goodput-measurement library),
     disruptions and MTBI, mean MTTR and its breakdown into the 10 recovery
     sub-phases.
+
+    ![Workload Metrics & Recovery Summary](../../docs/images/workload-summary.png)
+
+    *Synthetic data.*
+
 *   **Workload Overview**: a Gantt chart of all runs (Stepping, Startup /
     Recovery, Interruption) with the sub-events overlaid, and below it, on the
     same time axis:
@@ -94,6 +104,11 @@ python -m ml_goodput_measurement.timeline --command=export \
         elastic Pathways workloads report (`elastic_slice_counts`); hover an
         interval for the counts and how long they held. McJAX and non-elastic
         workloads do not log slice counts and have no such panel.
+
+        ![Overview of an elastic workload with the slices panel](../../docs/images/elastic-overview.png)
+
+        *Synthetic data.*
+
 *   **One section per run**: the run's recovery time breakdown and timeline.
     In the timeline, Stepping and Wasted Progress are containers: Productive
     Steps and Lost Progress are the parts of them outside the JIT compile
@@ -112,6 +127,14 @@ with different recovery strategies. It writes one HTML page with:
     incident, stacked by phase group, and (B) each phase group's share of MTTR.
     Under each chart, collapsed tables break the recovery down by phase group
     and by all 10 recovery sub-phases.
+
+![Cross-run comparison table](../../docs/images/compare-table.png)
+
+*Synthetic data.*
+
+![Mean recovery time per incident and share of MTTR, by phase group](../../docs/images/recovery-anatomy.png)
+
+*Synthetic data.*
 
 The workloads, with their time ranges, models, scales and baselines, are listed
 in a JSON config (`--compare_config`). `compare` does not use `--start_time`

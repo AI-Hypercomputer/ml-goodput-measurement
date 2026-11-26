@@ -1,0 +1,34 @@
+{
+  "title": "Recovery strategies (synthetic data)",
+  "subtitle": "Example workloads; all names and numbers are made up.",
+  "groups": [
+    {
+      "name": "example-model · 4x64",
+      "description": "Synthetic data, 256 chips"
+    }
+  ],
+  "workloads": [
+    {
+      "workload_id": "full-restart-1",
+      "label": "Full restart",
+      "model": "example-model",
+      "shape": "4x64",
+      "baseline": true,
+      "entries_path": "full-restart-1.json"
+    },
+    {
+      "workload_id": "elastic-gcs-1",
+      "label": "Elastic, restore from checkpoint",
+      "model": "example-model",
+      "shape": "4x64",
+      "entries_path": "elastic-gcs-1.json"
+    },
+    {
+      "workload_id": "elastic-snapshot-1",
+      "label": "Elastic, in-memory snapshot",
+      "model": "example-model",
+      "shape": "4x64",
+      "entries_path": "elastic-snapshot-1.json"
+    }
+  ]
+}
